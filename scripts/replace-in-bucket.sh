@@ -24,6 +24,7 @@ width() { sips -g pixelWidth "$1" 2>/dev/null | awk '/pixelWidth/ {print $2}'; }
 for ID in "$@"; do
   for KIND in ${KINDS//,/ }; do
     if [ "$KIND" = root ]; then KEY="$PREFIX/$ID"; else KEY="$PREFIX/$KIND/$ID"; fi
+    case "$ID" in *-orig) continue;; esac
     IN="$WORK/$ID-$KIND.in"; OUT="$WORK/$ID-$KIND.$FORMAT"
     if ! aws s3 cp --endpoint-url "$EP" "s3://$BUCKET/$KEY" "$IN" >/dev/null 2>&1; then
       printf '%-48s missing, skipped\n' "$KEY"; continue
@@ -36,6 +37,10 @@ for ID in "$@"; do
       printf '%-48s upscale failed\n' "$KEY"; continue
     fi
     CT=image/jpeg; [ "$FORMAT" = png ] && CT=image/png; [ "$FORMAT" = webp ] && CT=image/webp
+    # Keep the original beside the replacement, unless a copy is already there.
+    if ! aws s3api head-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$KEY-orig" >/dev/null 2>&1; then
+      aws s3 cp --endpoint-url "$EP" "s3://$BUCKET/$KEY" "s3://$BUCKET/$KEY-orig" >/dev/null 2>&1 || { printf '%-48s could not keep the original, skipped\n' "$KEY"; continue; }
+    fi
     if aws s3 cp --endpoint-url "$EP" "$OUT" "s3://$BUCKET/$KEY" --content-type "$CT" >/dev/null 2>&1; then
       printf '%-48s %spx -> %spx, %s uploaded\n' "$KEY" "$W" "$(width "$OUT")" "$(du -h "$OUT" | cut -f1)"
       PURGE+=("https://cdn.weeb.vip/$KEY")

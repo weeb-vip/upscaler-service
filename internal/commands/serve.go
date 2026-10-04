@@ -8,7 +8,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/weeb-vip/upscaler-service/config"
 	"github.com/weeb-vip/upscaler-service/internal/server"
-	"github.com/weeb-vip/upscaler-service/internal/upscaler"
 )
 
 var serveCmd = &cobra.Command{
@@ -16,10 +15,7 @@ var serveCmd = &cobra.Command{
 	Short: "Serve POST /upscale and GET /healthz",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := config.Load()
-		up := upscaler.New(upscaler.Options{
-			Binary: cfg.Binary, ModelsDir: cfg.ModelsDir, Model: cfg.Model, Scale: cfg.Scale,
-			GPU: cfg.GPU, Tile: cfg.Tile, Timeout: cfg.Timeout,
-		})
+		up := newUpscaler(cfg)
 		if err := up.Check(); err != nil {
 			return err
 		}

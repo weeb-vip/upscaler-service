@@ -23,6 +23,46 @@ curl --data-binary @poster.jpg -H 'Content-Type: image/jpeg' \
 
 The CLI does the same for one file: `./main upscale in.jpg out.png`.
 
+## In the pipeline
+
+`consume` listens on NATS for image-sync's `image-stored` announcements and
+runs each stored object through the pipeline; `backfill --prefix weeb/`
+walks what is already in the bucket. Both apply the same rules:
+
+1. Skip `<key>-orig` copies, and anything already carrying `upscaled`
+   metadata (a 225px image comes back at 900px, still under the width
+   threshold, so provenance is what stops a replayed event).
+2. Skip anything at least `UPSCALER_MIN_WIDTH` (1000px) wide. Every 225px
+   MyAnimeList image and every 680px TheTVDB poster is below it.
+3. Copy the object to `<key>-orig` unless that copy exists.
+4. Upscale, write back over the same key as JPEG with the original's
+   metadata carried over (image-sync's `source-length` is what keeps it
+   from re-downloading the small original over the result) plus
+   `upscaled`, `upscaled-from-width` and `upscaled-at`.
+5. Purge `CDN_BASE_URL/<key>` from Cloudflare when a zone id and API token
+   are set, so the resizer rebuilds its variants from the new bytes.
+
+| Variable | Default | |
+|---|---|---|
+| `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY_ID`, `MINIO_SECRET_ACCESS_KEY`, `MINIO_USESSL`, `MINIO_BUCKET` | image-sync's | The bucket |
+| `MINIO_PREFIX` | `weeb` | Key prefix the announced paths live under (`weeb-staging` on staging) |
+| `UPSCALER_MIN_WIDTH` | `1000` | |
+| `UPSCALER_KEEP_ORIGINAL` / `UPSCALER_ORIG_SUFFIX` | `true` / `-orig` | |
+| `UPSCALER_BUCKET_FORMAT` | `jpg` | `webp` also works |
+| `CDN_BASE_URL` | `https://cdn.weeb.vip` | |
+| `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_API_TOKEN` | unset | Purge off when unset |
+| `NATSURL`, `NATSCONSUMERGROUPNAME`, `NATSSUBJECT`, `NATSOFFSET` | `nats://localhost:4222`, `upscaler-service`, `image-stored`, `earliest` | |
+| `UPSCALER_WORKERS` | `1` | Concurrent upscales; one per GPU |
+
+## Models
+
+The ncnn build ships `realesrgan-x4plus-anime` (the default: illustrations,
+and the JPEG artefacts on them), `realesrgan-x4plus` (photos and general
+images; softer on line art) and `realesr-animevideov3-x2/x3/x4` (lighter
+networks for anime video frames; faster, smoother, less detail). Anything
+else -- waifu2x, Real-CUGAN, the community ESRGAN checkpoints -- needs its
+own runner; swap the binary and model name through the variables above.
+
 ## Configuration
 
 | Variable | Default | |

@@ -33,6 +33,50 @@ type Config struct {
 	Timeout time.Duration
 	// MaxUploadBytes caps a request body.
 	MaxUploadBytes int64
+
+	Bucket   BucketConfig
+	Pipeline PipelineConfig
+	Nats     NatsConfig
+	// Cloudflare cache purge for replaced objects; both empty disables it.
+	CloudflareZoneID string
+	CloudflareToken  string
+}
+
+// BucketConfig uses image-sync's variable names, so the two deployments can
+// share one set of values.
+type BucketConfig struct {
+	Endpoint        string
+	AccessKeyID     string
+	SecretAccessKey string
+	UseSSL          bool
+	Bucket          string
+	// Prefix is the part of the key before image-sync's leading-slashed path:
+	// "weeb" in production, "weeb-staging" on staging.
+	Prefix string
+}
+
+type PipelineConfig struct {
+	// MinWidth: an image at least this wide is not upscaled.
+	MinWidth int
+	// KeepOriginal keeps a copy at <key>-orig before replacing.
+	KeepOriginal bool
+	OrigSuffix   string
+	// Format the replacement is written in: jpg or webp.
+	Format string
+	// CDNBase is the public origin objects are served from, for the purge.
+	CDNBase string
+}
+
+type NatsConfig struct {
+	URL               string
+	ConsumerGroupName string
+	StreamName        string
+	Offset            string
+	// Subject is where image-sync announces stored objects.
+	Subject string
+	// Workers upscale concurrently. One per GPU; on a CPU more than two
+	// just contend.
+	Workers int
 }
 
 func Load() Config {
@@ -47,6 +91,31 @@ func Load() Config {
 		Format:         env("UPSCALER_FORMAT", "png"),
 		Timeout:        durationEnv("UPSCALER_TIMEOUT", 10*time.Minute),
 		MaxUploadBytes: int64(intEnv("UPSCALER_MAX_UPLOAD_MB", 20)) << 20,
+		Bucket: BucketConfig{
+			Endpoint:        env("MINIO_ENDPOINT", "localhost:9000"),
+			AccessKeyID:     env("MINIO_ACCESS_KEY_ID", "minio"),
+			SecretAccessKey: env("MINIO_SECRET_ACCESS_KEY", "minio123"),
+			UseSSL:          env("MINIO_USESSL", "false") == "true",
+			Bucket:          env("MINIO_BUCKET", "weeb"),
+			Prefix:          env("MINIO_PREFIX", "weeb"),
+		},
+		Pipeline: PipelineConfig{
+			MinWidth:     intEnv("UPSCALER_MIN_WIDTH", 1000),
+			KeepOriginal: env("UPSCALER_KEEP_ORIGINAL", "true") == "true",
+			OrigSuffix:   env("UPSCALER_ORIG_SUFFIX", "-orig"),
+			Format:       env("UPSCALER_BUCKET_FORMAT", "jpg"),
+			CDNBase:      env("CDN_BASE_URL", "https://cdn.weeb.vip"),
+		},
+		Nats: NatsConfig{
+			URL:               env("NATSURL", "nats://localhost:4222"),
+			ConsumerGroupName: env("NATSCONSUMERGROUPNAME", "upscaler-service"),
+			StreamName:        env("NATSSTREAMNAME", ""),
+			Offset:            env("NATSOFFSET", "earliest"),
+			Subject:           env("NATSSUBJECT", "image-stored"),
+			Workers:           intEnv("UPSCALER_WORKERS", 1),
+		},
+		CloudflareZoneID: env("CLOUDFLARE_ZONE_ID", ""),
+		CloudflareToken:  env("CLOUDFLARE_API_TOKEN", ""),
 	}
 }
 
