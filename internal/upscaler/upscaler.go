@@ -27,8 +27,8 @@ type Options struct {
 	Model     string
 	Scale     int
 	// GPU is "auto", or a device index; "-1" forces the CPU.
-	GPU     string
-	Tile    int
+	GPU  string
+	Tile int
 	// Threads is the binary's -j load:proc:save. Processing threads are
 	// what lavapipe's memory scales with: each one carries its own working
 	// set, so fewer threads is the lever when a run is OOM-killed.
