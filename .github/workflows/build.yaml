@@ -20,10 +20,11 @@ jobs:
         run: go test ./...
       - name: build image
         run: docker build --build-arg VERSION=${{ github.sha }} -t upscaler-service:test .
-      - name: the binary and the model are in the image
+      - name: the runner upscales an image inside the image
         run: |
-          docker run --rm --entrypoint realesrgan-ncnn-vulkan upscaler-service:test -h 2>&1 | head -3 || true
-          docker run --rm --entrypoint ls upscaler-service:test /app/models | grep -q realesrgan-x4plus-anime.bin
+          python3 -c "from PIL import Image; Image.new('RGB',(96,64),(200,30,30)).save('/tmp/in.png')" 2>/dev/null || docker run --rm -v /tmp:/tmp --entrypoint python3 upscaler-service:test -c "from PIL import Image; Image.new('RGB',(96,64),(200,30,30)).save('/tmp/in.png')"
+          docker run --rm -v /tmp:/tmp --entrypoint /app/runner/upscale.py upscaler-service:test -i /tmp/in.png -o /tmp/out.png -n realesr-general-x4v3 -s 2 -t 64 -v
+          docker run --rm -v /tmp:/tmp --entrypoint python3 upscaler-service:test -c "from PIL import Image; im=Image.open('/tmp/out.png'); assert im.size==(192,128), im.size; print('ok', im.size)"
 
   release:
     # semantic-release builds the image from the release commit, tags it with the

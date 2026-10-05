@@ -1,0 +1,3 @@
+# Conversion only (.pth -> .onnx); the runtime image does not install these.
+onnx==1.23.1
+torch

@@ -2,3 +2,6 @@
 /bin/
 /samples/
 /.env
+/.venv/
+/runner/models/*.pth
+__pycache__/

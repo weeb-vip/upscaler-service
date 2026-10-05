@@ -17,12 +17,12 @@ type Config struct {
 	// ModelsDir holds the .param/.bin pairs; empty means the binary's own default
 	// (a `models` directory beside it).
 	ModelsDir string
-	// Model is the network to run. realesrgan-x4plus is the general one: the
-	// catalogue is promotional posters that mix illustration, painted
-	// backgrounds, logos and typography, and the anime model redraws all of
-	// it as flat colour and clean strokes -- small text came out as invented
-	// letter shapes. The general model keeps text and gradients honest at the
-	// cost of slightly softer line art.
+	// Model is the network to run. realesr-general-x4v3 is the general,
+	// lightweight one (SRVGG): the catalogue is promotional posters that mix
+	// illustration, painted backgrounds, logos and typography, and the
+	// anime-trained models redraw all of it as flat colour and clean strokes
+	// -- small text came out as invented letter shapes. It is also the one
+	// that runs on a CPU in seconds. realesr-animevideov3 is lighter still.
 	Model string
 	// Scale is the factor to run at. 2 by default, not the model's native 4:
 	// the object at the key is capped at a display width anyway (1000px for
@@ -108,7 +108,7 @@ func Load() Config {
 		Port:           intEnv("PORT", 3000),
 		Binary:         env("UPSCALER_BINARY", "realesrgan-ncnn-vulkan"),
 		ModelsDir:      env("UPSCALER_MODELS_DIR", ""),
-		Model:          env("UPSCALER_MODEL", "realesrgan-x4plus"),
+		Model:          env("UPSCALER_MODEL", "realesr-general-x4v3"),
 		Scale:          intEnv("UPSCALER_SCALE", 2),
 		GPU:            env("UPSCALER_GPU", "auto"),
 		Tile:           intEnv("UPSCALER_TILE", 0),

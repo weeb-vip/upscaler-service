@@ -8,9 +8,13 @@ clean strokes, turning small text into invented letter shapes. The general
 model keeps text and gradients honest at the cost of slightly softer line
 art; `UPSCALER_MODEL=realesrgan-x4plus-anime` switches back.
 
-The service is a thin HTTP wrapper around the authors' `realesrgan-ncnn-vulkan`
-build. That build is one static executable that runs on a GPU through Vulkan
-or on a CPU through a software Vulkan driver; no Python, no CUDA.
+The service shells out to a runner with the command line of the authors'
+`realesrgan-ncnn-vulkan` build. In the container that runner is
+`runner/upscale.py`: the model on the CPU through ONNX Runtime, tiled so
+memory is bounded (about 700 MB), a poster in seconds to tens of seconds
+depending on the CPU. The ncnn build is GPU-only -- on a software Vulkan
+driver it needed more than 3 GB and ten minutes per poster -- but the same
+service runs it where a GPU exists (`UPSCALER_BINARY`), a Mac included.
 
 ## Endpoints
 
@@ -67,6 +71,22 @@ walks what is already in the bucket. Both apply the same rules:
 | `UPSCALER_KEEP_FULL` / `UPSCALER_DISPLAY_QUALITY` | `true` / `90` | Keep the uncapped result at `<key>-full`; JPEG quality of the capped copy |
 | `UPSCALER_SCALE_ANIME`, `_POSTER`, `_BANNER`, `_CHARACTER`, `_STAFF`, `_WORK` | unset | Scale per kind (2, 3 or 4), read off the key's folder; unset means `UPSCALER_SCALE`. A 424px MyAnimeList image at 2x lands where a 225px one did at 4x, with far less invented detail |
 
+## The CPU runner
+
+`runner/upscale.py` takes the ncnn flags (`-i -o -n -s -m -t -j -f`) and runs
+the SRVGG graphs in `runner/models/*.onnx` with ONNX Runtime, tiled with a
+10px overlap. The native factor is 4; `-s 2` or `3` scales the 4x result
+down with Lanczos, as the ncnn build does. To add a checkpoint:
+
+```sh
+python -m venv .venv && .venv/bin/pip install -r runner/requirements.txt -r runner/requirements-convert.txt
+.venv/bin/python runner/convert.py runner/models/realesr-general-x4v3.pth runner/models/realesr-general-x4v3.onnx
+```
+
+Only SRVGG checkpoints are convertible here (`runner/srvgg.py`); the RRDB
+ones (`realesrgan-x4plus`, `-anime`) would need their architecture added
+and are several times slower on a CPU.
+
 ## Models
 
 The ncnn build ships `realesrgan-x4plus` (the default: general images,
@@ -81,9 +101,9 @@ own runner; swap the binary and model name through the variables above.
 | Variable | Default | |
 |---|---|---|
 | `PORT` | `3000` | |
-| `UPSCALER_BINARY` | `realesrgan-ncnn-vulkan` | Name on PATH or a path |
-| `UPSCALER_MODELS_DIR` | binary's default | The `.param`/`.bin` directory |
-| `UPSCALER_MODEL` | `realesrgan-x4plus` | Also `realesrgan-x4plus-anime`, `realesr-animevideov3-x{2,3,4}` |
+| `UPSCALER_BINARY` | `realesrgan-ncnn-vulkan` (image: `/app/runner/upscale.py`) | Name on PATH or a path |
+| `UPSCALER_MODELS_DIR` | binary's default (image: `/app/runner/models`) | `.onnx` files for the CPU runner, `.param`/`.bin` for ncnn |
+| `UPSCALER_MODEL` | `realesr-general-x4v3` | Also `realesr-general-wdn-x4v3` (denoising), `realesr-animevideov3` (lighter) |
 | `UPSCALER_SCALE` | `2` | 2, 3 or 4. The key is capped at a display width anyway, and 4x of a poster on lavapipe needs more than 3 GB |
 | `UPSCALER_GPU` | `auto` | Vulkan device index. There is no "CPU" value: a software Vulkan driver (Mesa's lavapipe) is device 0, which `auto` picks; `-1` makes the binary answer "invalid gpu device" |
 | `UPSCALER_TILE` | `0` | Smaller tiles use less memory |
