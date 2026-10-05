@@ -79,7 +79,7 @@ own runner; swap the binary and model name through the variables above.
 | `UPSCALER_MODELS_DIR` | binary's default | The `.param`/`.bin` directory |
 | `UPSCALER_MODEL` | `realesrgan-x4plus` | Also `realesrgan-x4plus-anime`, `realesr-animevideov3-x{2,3,4}` |
 | `UPSCALER_SCALE` | `4` | What the model was trained for |
-| `UPSCALER_GPU` | `auto` | Device index; `-1` forces CPU |
+| `UPSCALER_GPU` | `auto` | Vulkan device index. There is no "CPU" value: a software Vulkan driver (Mesa's lavapipe) is device 0, which `auto` picks; `-1` makes the binary answer "invalid gpu device" |
 | `UPSCALER_TILE` | `0` | Smaller tiles use less memory |
 | `UPSCALER_FORMAT` | `png` | Default output when the request names none |
 | `UPSCALER_TIMEOUT` | `10m` | Per image |

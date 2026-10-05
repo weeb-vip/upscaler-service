@@ -26,8 +26,9 @@ type Config struct {
 	Model string
 	// Scale is the upscale factor the model was trained for.
 	Scale int
-	// GPU is the device index; -1 runs on the CPU, which is slow but needs no
-	// hardware. "auto" lets the binary pick.
+	// GPU is the Vulkan device index, or "auto" to let the binary pick. There
+	// is no CPU value: a software Vulkan driver (Mesa's lavapipe) presents
+	// itself as device 0, and -1 makes the binary answer "invalid gpu device".
 	GPU string
 	// Tile size; 0 lets the binary decide. Smaller tiles need less memory.
 	Tile int
