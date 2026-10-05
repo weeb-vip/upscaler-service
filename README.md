@@ -42,8 +42,13 @@ walks what is already in the bucket. Both apply the same rules:
 1. Skip `<key>-orig` copies, and anything already carrying `upscaled`
    metadata (a 225px image comes back at 900px, still under the width
    threshold, so provenance is what stops a replayed event).
-2. Skip anything at least `UPSCALER_MIN_WIDTH` (1000px) wide. Every 225px
-   MyAnimeList image and every 680px TheTVDB poster is below it.
+2. Anything at least `UPSCALER_MIN_WIDTH` (1000px) wide is not upscaled,
+   but is still normalised for display, once: brought down to its kind's
+   display width if wider, re-encoded as JPEG at `UPSCALER_DISPLAY_QUALITY`
+   if heavier than `UPSCALER_MAX_KB` (250). Nothing resizes on delivery any
+   more, so a 1.3 MB poster would otherwise be 1.3 MB on every card. The
+   original is kept at `<key>-orig`; a `normalized` flag stops a re-run
+   touching it again.
 3. Copy the object to `<key>-orig` unless that copy exists.
 4. Upscale. The full result goes to `<key>-full`; the key itself gets a
    copy capped at a display width per kind (600px roots, 1000px posters
@@ -68,7 +73,8 @@ walks what is already in the bucket. Both apply the same rules:
 | `NATSURL`, `NATSCONSUMERGROUPNAME`, `NATSSUBJECT`, `NATSOFFSET` | `nats://localhost:4222`, `upscaler-service`, `image-stored`, `earliest` | |
 | `UPSCALER_WORKERS` | `1` | Concurrent upscales; one per GPU |
 | `UPSCALER_MAX_WIDTH_ANIME`, `_POSTER`, `_BANNER`, `_CHARACTER`, `_STAFF`, `_WORK` | 600, 1000, 1920, 600, 600, 1000 | Display width the object at the key is capped at |
-| `UPSCALER_KEEP_FULL` / `UPSCALER_DISPLAY_QUALITY` | `true` / `90` | Keep the uncapped result at `<key>-full`; JPEG quality of the capped copy |
+| `UPSCALER_KEEP_FULL` / `UPSCALER_DISPLAY_QUALITY` | `true` / `85` | Keep the uncapped result at `<key>-full`; JPEG quality of the display copy |
+| `UPSCALER_MAX_KB` | `250` | A stored object heavier than this is re-encoded at the display quality, once; 0 disables |
 | `UPSCALER_SCALE_ANIME`, `_POSTER`, `_BANNER`, `_CHARACTER`, `_STAFF`, `_WORK` | unset | Scale per kind (2, 3 or 4), read off the key's folder; unset means `UPSCALER_SCALE`. A 424px MyAnimeList image at 2x lands where a 225px one did at 4x, with far less invented detail |
 
 ## The CPU runner
