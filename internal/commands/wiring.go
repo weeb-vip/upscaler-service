@@ -50,5 +50,6 @@ func newPipeline(cfg config.Config) (*pipeline.Pipeline, error) {
 		MinWidth: cfg.Pipeline.MinWidth, KeepOriginal: cfg.Pipeline.KeepOriginal, OrigSuffix: cfg.Pipeline.OrigSuffix,
 		Format: cfg.Pipeline.Format, CDNBase: cfg.Pipeline.CDNBase, Model: cfg.Model, Scales: scales,
 		DisplayWidths: widths, KeepFull: cfg.Pipeline.KeepFull, DisplayQuality: cfg.Pipeline.DisplayQuality,
+		MaxBytes: cfg.Pipeline.MaxBytes,
 	}), nil
 }

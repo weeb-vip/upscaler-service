@@ -124,7 +124,8 @@ func TestANarrowImageIsUpscaledInPlaceWithTheOriginalKeptBesideIt(t *testing.T) 
 }
 
 func TestAWideImageIsLeftAlone(t *testing.T) {
-	store, up, _, p := setup(1920)
+	// 1000px: at the poster cap, not over it, and light enough to keep.
+	store, up, _, p := setup(1000)
 	before := store.objs["weeb/posters/one"]
 
 	res, err := p.Handle(context.Background(), "weeb/posters/one")
@@ -311,5 +312,64 @@ func TestEachKindHasItsOwnCap(t *testing.T) {
 	res, _ = p.Handle(context.Background(), "weeb/banners/one")
 	if res.NewWidth != 1920 || widthOf(store.objs["weeb/banners/one"].data) != 1920 {
 		t.Errorf("banner: %+v (4x of 680 is 2720, capped at 1920)", res)
+	}
+}
+
+// Nothing resizes on delivery any more, so objects that never needed an
+// upscale still need to be a display size and weight: a 1920px banner is
+// fine as it is, a 3000px scan is brought down, a 1.3 MB poster re-encoded.
+func TestUntouchedObjectsAreNormalisedForDisplayOnce(t *testing.T) {
+	var noisy bytes.Buffer
+	// Random pixels do not compress: a 1000px-wide image (at the cap, so
+	// not an upscale candidate) well over 250 KB.
+	rnd := image.NewRGBA(image.Rect(0, 0, 1000, 1470))
+	for i := range rnd.Pix {
+		rnd.Pix[i] = uint8((i * 7919) % 251)
+	}
+	jpeg.Encode(&noisy, rnd, &jpeg.Options{Quality: 100})
+	store := &memStore{objs: map[string]obj{
+		"weeb/posters/heavy": {noisy.Bytes(), "image/jpeg", map[string]string{"source-length": "1"}},
+		"weeb/posters/wide":  {jpegOf(3000, 4400), "image/jpeg", nil},
+		"weeb/banners/fine":  {jpegOf(1920, 1080), "image/jpeg", nil},
+	}}
+	up := &fakeUp{}
+	p := New(store, up, nil, Options{KeepOriginal: true, MaxBytes: 250 * 1024})
+
+	res, err := p.Handle(context.Background(), "weeb/posters/heavy")
+	if err != nil || res.Outcome != Recompressed {
+		t.Fatalf("heavy: %+v %v", res, err)
+	}
+	if len(store.objs["weeb/posters/heavy"].data) >= noisy.Len() {
+		t.Error("heavy poster did not get smaller")
+	}
+	if _, kept := store.objs["weeb/posters/heavy-orig"]; !kept {
+		t.Error("original of the heavy poster not kept")
+	}
+	if store.objs["weeb/posters/heavy"].meta["source-length"] != "1" {
+		t.Error("metadata lost on recompress")
+	}
+
+	res, err = p.Handle(context.Background(), "weeb/posters/wide")
+	if err != nil || res.Outcome != Downsized || res.NewWidth != 1000 {
+		t.Fatalf("wide: %+v %v", res, err)
+	}
+	if _, kept := store.objs["weeb/posters/wide-orig"]; !kept {
+		t.Error("original of the wide poster not kept")
+	}
+
+	res, err = p.Handle(context.Background(), "weeb/banners/fine")
+	if err != nil || res.Outcome != AlreadyWide {
+		t.Fatalf("fine: %+v %v", res, err)
+	}
+	if up.calls != 0 {
+		t.Errorf("no upscaling expected, got %d calls", up.calls)
+	}
+
+	// Second pass: all marked normalised, nothing happens.
+	for _, k := range []string{"weeb/posters/heavy", "weeb/posters/wide"} {
+		res, _ = p.Handle(context.Background(), k)
+		if res.Outcome != AlreadyWide {
+			t.Errorf("%s second pass: %+v", k, res)
+		}
 	}
 }

@@ -92,6 +92,11 @@ type Options struct {
 	FullSuffix string
 	// Quality of the capped JPEG.
 	DisplayQuality int
+	// MaxBytes: an object within its width cap but heavier than this is
+	// re-encoded as JPEG at DisplayQuality. Nothing resizes on delivery any
+	// more, so a 1.3 MB poster is 1.3 MB on every card that shows it. 0
+	// turns it off.
+	MaxBytes int
 }
 
 // Metadata written on a replaced object. image-sync's `source-length` is
@@ -128,7 +133,10 @@ func New(store bucket.Store, up Upscaler, purger purge.Purger, opts Options) *Pi
 		opts.FullSuffix = "-full"
 	}
 	if opts.DisplayQuality == 0 {
-		opts.DisplayQuality = 90
+		opts.DisplayQuality = 85
+	}
+	if opts.MaxBytes == 0 {
+		opts.MaxBytes = 250 * 1024
 	}
 	return &Pipeline{store: store, up: up, purger: purger, opts: opts}
 }
@@ -139,11 +147,16 @@ type Outcome string
 const (
 	Upscaled        Outcome = "upscaled"
 	Downsized       Outcome = "downsized"
+	Recompressed    Outcome = "recompressed"
 	AlreadyWide     Outcome = "already-wide"
 	AlreadyUpscaled Outcome = "already-upscaled"
 	IsOriginal      Outcome = "is-original-copy"
 	Undecodable     Outcome = "undecodable"
 )
+
+// MetaNormalized marks an object the pipeline has sized and compressed for
+// display, so a re-run leaves it alone.
+const MetaNormalized = "normalized"
 
 type Result struct {
 	Key      string
@@ -184,12 +197,20 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 		// result sitting at the key is brought down to display size, with
 		// the full result kept beside it first.
 		if cap > 0 && cfg.Width > cap {
-			return p.downsize(ctx, key, data, meta, cap, res)
+			return p.downsize(ctx, key, data, meta, cap, res, true)
 		}
 		res.Outcome = AlreadyUpscaled
 		return res, nil
 	}
 	if cfg.Width >= p.opts.MinWidth {
+		// Not upscaled, but still served as stored: a 1920px banner or a
+		// heavy poster gets the same display treatment, once.
+		if meta[MetaNormalized] == "" && cap > 0 && cfg.Width > cap {
+			return p.downsize(ctx, key, data, meta, cap, res, false)
+		}
+		if meta[MetaNormalized] == "" && p.opts.MaxBytes > 0 && len(data) > p.opts.MaxBytes {
+			return p.recompress(ctx, key, data, meta, res)
+		}
 		res.Outcome = AlreadyWide
 		return res, nil
 	}
@@ -243,6 +264,7 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 		ct = "image/jpeg"
 	}
 	newMeta[MetaDisplayWidth] = strconv.Itoa(displayWidth)
+	newMeta[MetaNormalized] = "1"
 	if err := p.store.Put(ctx, key, display, ct, newMeta); err != nil {
 		return res, fmt.Errorf("put %s: %w", key, err)
 	}
@@ -264,33 +286,88 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 	return res, nil
 }
 
-// downsize brings an already-upscaled object at the key down to the display
-// cap, keeping the full result at <key><FullSuffix> unless that exists.
-func (p *Pipeline) downsize(ctx context.Context, key string, data []byte, meta map[string]string, cap int, res Result) (Result, error) {
+// downsize brings an object at the key down to the display cap. For an
+// upscaled result the uncapped copy is kept at <key><FullSuffix>; for an
+// untouched original it is kept at <key><OrigSuffix>, unless either exists.
+func (p *Pipeline) downsize(ctx context.Context, key string, data []byte, meta map[string]string, cap int, res Result, upscaled bool) (Result, error) {
 	start := time.Now()
-	if p.opts.KeepFull {
-		full := key + p.opts.FullSuffix
-		exists, err := p.store.Exists(ctx, full)
-		if err != nil {
-			return res, fmt.Errorf("stat %s: %w", full, err)
-		}
-		if !exists {
-			if err := p.store.Copy(ctx, key, full); err != nil {
-				return res, fmt.Errorf("keep full %s: %w", full, err)
-			}
+	keep, suffix := p.opts.KeepFull, p.opts.FullSuffix
+	if !upscaled {
+		keep, suffix = p.opts.KeepOriginal, p.opts.OrigSuffix
+	}
+	if keep {
+		if err := p.keepCopy(ctx, key, key+suffix); err != nil {
+			return res, err
 		}
 	}
 	display, displayWidth, err := fitWidth(data, cap, p.opts.DisplayQuality)
 	if err != nil {
 		return res, fmt.Errorf("fit %s: %w", key, err)
 	}
-	newMeta := make(map[string]string, len(meta)+1)
-	for k, v := range meta {
-		newMeta[k] = v
+	if err := p.putDisplay(ctx, key, display, meta, displayWidth); err != nil {
+		return res, err
 	}
-	newMeta[MetaDisplayWidth] = strconv.Itoa(displayWidth)
+	res.Outcome = Downsized
+	res.NewWidth = displayWidth
+	res.Bytes = len(display)
+	res.Took = time.Since(start)
+	return res, nil
+}
+
+// recompress re-encodes a heavy object within its width cap as JPEG at
+// DisplayQuality, original kept at <key><OrigSuffix>. A result no smaller
+// than the input is not written; the object is marked normalized either
+// way so it is not revisited.
+func (p *Pipeline) recompress(ctx context.Context, key string, data []byte, meta map[string]string, res Result) (Result, error) {
+	start := time.Now()
+	display, width, err := reencode(data, p.opts.DisplayQuality)
+	if err != nil {
+		return res, fmt.Errorf("re-encode %s: %w", key, err)
+	}
+	if len(display) >= len(data) {
+		newMeta := copyMeta(meta)
+		newMeta[MetaNormalized] = "1"
+		if err := p.store.Put(ctx, key, data, contentTypeOf(data), newMeta); err != nil {
+			return res, fmt.Errorf("put %s: %w", key, err)
+		}
+		res.Outcome = AlreadyWide
+		return res, nil
+	}
+	if p.opts.KeepOriginal {
+		if err := p.keepCopy(ctx, key, key+p.opts.OrigSuffix); err != nil {
+			return res, err
+		}
+	}
+	if err := p.putDisplay(ctx, key, display, meta, width); err != nil {
+		return res, err
+	}
+	res.Outcome = Recompressed
+	res.NewWidth = width
+	res.Bytes = len(display)
+	res.Took = time.Since(start)
+	return res, nil
+}
+
+func (p *Pipeline) keepCopy(ctx context.Context, key, copyKey string) error {
+	exists, err := p.store.Exists(ctx, copyKey)
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", copyKey, err)
+	}
+	if exists {
+		return nil
+	}
+	if err := p.store.Copy(ctx, key, copyKey); err != nil {
+		return fmt.Errorf("keep %s: %w", copyKey, err)
+	}
+	return nil
+}
+
+func (p *Pipeline) putDisplay(ctx context.Context, key string, display []byte, meta map[string]string, width int) error {
+	newMeta := copyMeta(meta)
+	newMeta[MetaDisplayWidth] = strconv.Itoa(width)
+	newMeta[MetaNormalized] = "1"
 	if err := p.store.Put(ctx, key, display, "image/jpeg", newMeta); err != nil {
-		return res, fmt.Errorf("put %s: %w", key, err)
+		return fmt.Errorf("put %s: %w", key, err)
 	}
 	if p.purger != nil && p.opts.CDNBase != "" {
 		url := strings.TrimSuffix(p.opts.CDNBase, "/") + "/" + key
@@ -298,11 +375,32 @@ func (p *Pipeline) downsize(ctx context.Context, key string, data []byte, meta m
 			log.Printf("purge %s: %v", url, err)
 		}
 	}
-	res.Outcome = Downsized
-	res.NewWidth = displayWidth
-	res.Bytes = len(display)
-	res.Took = time.Since(start)
-	return res, nil
+	return nil
+}
+
+func copyMeta(meta map[string]string) map[string]string {
+	out := make(map[string]string, len(meta)+2)
+	for k, v := range meta {
+		out[k] = v
+	}
+	return out
+}
+
+func contentTypeOf(data []byte) string {
+	_, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return "application/octet-stream"
+	}
+	switch format {
+	case "png":
+		return "image/png"
+	case "webp":
+		return "image/webp"
+	case "gif":
+		return "image/gif"
+	default:
+		return "image/jpeg"
+	}
 }
 
 func contentTypeFor(format string) string {

@@ -89,6 +89,8 @@ type PipelineConfig struct {
 	KeepFull bool
 	// DisplayQuality of the capped JPEG.
 	DisplayQuality int
+	// MaxBytes: a stored object heavier than this is re-encoded, once.
+	MaxBytes int
 }
 
 type NatsConfig struct {
@@ -133,7 +135,8 @@ func Load() Config {
 			Scales:         scalesByKind(),
 			DisplayWidths:  byKind("UPSCALER_MAX_WIDTH_"),
 			KeepFull:       env("UPSCALER_KEEP_FULL", "true") == "true",
-			DisplayQuality: intEnv("UPSCALER_DISPLAY_QUALITY", 90),
+			DisplayQuality: intEnv("UPSCALER_DISPLAY_QUALITY", 85),
+			MaxBytes:       intEnv("UPSCALER_MAX_KB", 250) * 1024,
 		},
 		Nats: NatsConfig{
 			URL:               env("NATSURL", "nats://localhost:4222"),

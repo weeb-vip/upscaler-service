@@ -70,7 +70,7 @@ var backfillCmd = &cobra.Command{
 				continue
 			}
 			counts[res.Outcome]++
-			if res.Outcome == pipeline.Upscaled || res.Outcome == pipeline.Downsized {
+			if res.Outcome == pipeline.Upscaled || res.Outcome == pipeline.Downsized || res.Outcome == pipeline.Recompressed {
 				log.Printf("%s: %dpx -> %dpx, %d bytes, %s", e.Key, res.Width, res.NewWidth, res.Bytes, res.Took.Round(1e6))
 			}
 		}
