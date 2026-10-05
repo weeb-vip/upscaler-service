@@ -38,8 +38,17 @@ func newPipeline(cfg config.Config) (*pipeline.Pipeline, error) {
 	for kind, n := range cfg.Pipeline.Scales {
 		scales[pipeline.Kind(kind)] = n
 	}
+	// Caps start from the defaults; a variable overrides one kind.
+	widths := make(map[pipeline.Kind]int, len(pipeline.DefaultDisplayWidths))
+	for kind, n := range pipeline.DefaultDisplayWidths {
+		widths[kind] = n
+	}
+	for kind, n := range cfg.Pipeline.DisplayWidths {
+		widths[pipeline.Kind(kind)] = n
+	}
 	return pipeline.New(store, up, purger, pipeline.Options{
 		MinWidth: cfg.Pipeline.MinWidth, KeepOriginal: cfg.Pipeline.KeepOriginal, OrigSuffix: cfg.Pipeline.OrigSuffix,
 		Format: cfg.Pipeline.Format, CDNBase: cfg.Pipeline.CDNBase, Model: cfg.Model, Scales: scales,
+		DisplayWidths: widths, KeepFull: cfg.Pipeline.KeepFull, DisplayQuality: cfg.Pipeline.DisplayQuality,
 	}), nil
 }

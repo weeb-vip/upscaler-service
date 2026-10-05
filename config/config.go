@@ -73,6 +73,13 @@ type PipelineConfig struct {
 	// Scales per kind (anime, poster, banner, character, staff, work); a kind
 	// left out uses UPSCALER_SCALE.
 	Scales map[string]int
+	// DisplayWidths per kind: the cap on what is stored at the key. Left out
+	// means the pipeline's defaults (600 roots, 1000 posters, 1920 banners).
+	DisplayWidths map[string]int
+	// KeepFull stores the uncapped result at <key>-4x.
+	KeepFull bool
+	// DisplayQuality of the capped JPEG.
+	DisplayQuality int
 }
 
 type NatsConfig struct {
@@ -108,12 +115,15 @@ func Load() Config {
 			Prefix:          env("MINIO_PREFIX", "weeb"),
 		},
 		Pipeline: PipelineConfig{
-			MinWidth:     intEnv("UPSCALER_MIN_WIDTH", 1000),
-			KeepOriginal: env("UPSCALER_KEEP_ORIGINAL", "true") == "true",
-			OrigSuffix:   env("UPSCALER_ORIG_SUFFIX", "-orig"),
-			Format:       env("UPSCALER_BUCKET_FORMAT", "jpg"),
-			CDNBase:      env("CDN_BASE_URL", "https://cdn.weeb.vip"),
-			Scales:       scalesByKind(),
+			MinWidth:       intEnv("UPSCALER_MIN_WIDTH", 1000),
+			KeepOriginal:   env("UPSCALER_KEEP_ORIGINAL", "true") == "true",
+			OrigSuffix:     env("UPSCALER_ORIG_SUFFIX", "-orig"),
+			Format:         env("UPSCALER_BUCKET_FORMAT", "jpg"),
+			CDNBase:        env("CDN_BASE_URL", "https://cdn.weeb.vip"),
+			Scales:         scalesByKind(),
+			DisplayWidths:  byKind("UPSCALER_MAX_WIDTH_"),
+			KeepFull:       env("UPSCALER_KEEP_FULL", "true") == "true",
+			DisplayQuality: intEnv("UPSCALER_DISPLAY_QUALITY", 90),
 		},
 		Nats: NatsConfig{
 			URL:               env("NATSURL", "nats://localhost:4222"),
@@ -130,10 +140,12 @@ func Load() Config {
 
 // UPSCALER_SCALE_ANIME=2 and friends: one variable per kind, read only when
 // set, so the runner's default covers the rest.
-func scalesByKind() map[string]int {
+func scalesByKind() map[string]int { return byKind("UPSCALER_SCALE_") }
+
+func byKind(prefix string) map[string]int {
 	out := map[string]int{}
 	for _, kind := range []string{"anime", "poster", "banner", "character", "staff", "work"} {
-		if n := intEnv("UPSCALER_SCALE_"+strings.ToUpper(kind), 0); n > 0 {
+		if n := intEnv(prefix+strings.ToUpper(kind), 0); n > 0 {
 			out[kind] = n
 		}
 	}

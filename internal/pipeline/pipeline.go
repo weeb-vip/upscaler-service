@@ -83,15 +83,25 @@ type Options struct {
 	// MyAnimeList image at 2x lands where a 225px one did at 4x, with far
 	// less invented detail; a 680px poster at 4x is 2720px.
 	Scales map[Kind]int
+	// DisplayWidths cap what is stored at the key, per kind; the full
+	// result is kept at <key><FullSuffix>. Nil means DefaultDisplayWidths;
+	// a kind set to 0 is not capped.
+	DisplayWidths map[Kind]int
+	// KeepFull stores the uncapped result beside the key.
+	KeepFull   bool
+	FullSuffix string
+	// Quality of the capped JPEG.
+	DisplayQuality int
 }
 
 // Metadata written on a replaced object. image-sync's `source-length` is
 // carried over untouched: that is what keeps image-sync from re-downloading
 // the original over this.
 const (
-	MetaUpscaled   = "upscaled"
-	MetaFromWidth  = "upscaled-from-width"
-	MetaUpscaledAt = "upscaled-at"
+	MetaUpscaled     = "upscaled"
+	MetaFromWidth    = "upscaled-from-width"
+	MetaUpscaledAt   = "upscaled-at"
+	MetaDisplayWidth = "display-width"
 )
 
 type Pipeline struct {
@@ -111,6 +121,15 @@ func New(store bucket.Store, up Upscaler, purger purge.Purger, opts Options) *Pi
 	if opts.Format == "" {
 		opts.Format = "jpg"
 	}
+	if opts.DisplayWidths == nil {
+		opts.DisplayWidths = DefaultDisplayWidths
+	}
+	if opts.FullSuffix == "" {
+		opts.FullSuffix = "-4x"
+	}
+	if opts.DisplayQuality == 0 {
+		opts.DisplayQuality = 90
+	}
 	return &Pipeline{store: store, up: up, purger: purger, opts: opts}
 }
 
@@ -119,6 +138,7 @@ type Outcome string
 
 const (
 	Upscaled        Outcome = "upscaled"
+	Downsized       Outcome = "downsized"
 	AlreadyWide     Outcome = "already-wide"
 	AlreadyUpscaled Outcome = "already-upscaled"
 	IsOriginal      Outcome = "is-original-copy"
@@ -140,7 +160,7 @@ type Result struct {
 func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 	start := time.Now()
 	res := Result{Key: key}
-	if strings.HasSuffix(key, p.opts.OrigSuffix) {
+	if strings.HasSuffix(key, p.opts.OrigSuffix) || strings.HasSuffix(key, p.opts.FullSuffix) {
 		res.Outcome = IsOriginal
 		return res, nil
 	}
@@ -152,16 +172,23 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 	// Provenance first, width second: a 225px image comes back at 900px,
 	// which is still under MinWidth, and a replayed event would otherwise
 	// upscale the upscale to 3600px.
-	if meta[MetaUpscaled] != "" {
-		res.Outcome = AlreadyUpscaled
-		return res, nil
-	}
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
 		res.Outcome = Undecodable
 		return res, nil
 	}
 	res.Width = cfg.Width
+	cap := p.opts.DisplayWidths[KindOf(key)]
+	if meta[MetaUpscaled] != "" {
+		// Done before, but possibly before objects were capped: a 2720px
+		// result sitting at the key is brought down to display size, with
+		// the full result kept beside it first.
+		if cap > 0 && cfg.Width > cap {
+			return p.downsize(ctx, key, data, meta, cap, res)
+		}
+		res.Outcome = AlreadyUpscaled
+		return res, nil
+	}
 	if cfg.Width >= p.opts.MinWidth {
 		res.Outcome = AlreadyWide
 		return res, nil
@@ -190,7 +217,7 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 		return res, fmt.Errorf("upscale %s produced an undecodable image: %w", key, err)
 	}
 
-	newMeta := make(map[string]string, len(meta)+3)
+	newMeta := make(map[string]string, len(meta)+4)
 	for k, v := range meta {
 		newMeta[k] = v
 	}
@@ -200,9 +227,27 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 	}
 	newMeta[MetaFromWidth] = strconv.Itoa(cfg.Width)
 	newMeta[MetaUpscaledAt] = time.Now().UTC().Format(time.RFC3339)
-	if err := p.store.Put(ctx, key, out, contentTypeFor(p.opts.Format), newMeta); err != nil {
+
+	// The full result beside the key; the key itself gets the display size.
+	if p.opts.KeepFull && cap > 0 && outCfg.Width > cap {
+		if err := p.store.Put(ctx, key+p.opts.FullSuffix, out, contentTypeFor(p.opts.Format), newMeta); err != nil {
+			return res, fmt.Errorf("put %s: %w", key+p.opts.FullSuffix, err)
+		}
+	}
+	display, displayWidth, err := fitWidth(out, cap, p.opts.DisplayQuality)
+	if err != nil {
+		return res, fmt.Errorf("fit %s: %w", key, err)
+	}
+	ct := contentTypeFor(p.opts.Format)
+	if displayWidth != outCfg.Width {
+		ct = "image/jpeg"
+	}
+	newMeta[MetaDisplayWidth] = strconv.Itoa(displayWidth)
+	if err := p.store.Put(ctx, key, display, ct, newMeta); err != nil {
 		return res, fmt.Errorf("put %s: %w", key, err)
 	}
+	out = display
+	outCfg.Width = displayWidth
 
 	if p.purger != nil && p.opts.CDNBase != "" {
 		url := strings.TrimSuffix(p.opts.CDNBase, "/") + "/" + key
@@ -215,6 +260,47 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 	res.Outcome = Upscaled
 	res.NewWidth = outCfg.Width
 	res.Bytes = len(out)
+	res.Took = time.Since(start)
+	return res, nil
+}
+
+// downsize brings an already-upscaled object at the key down to the display
+// cap, keeping the full result at <key><FullSuffix> unless that exists.
+func (p *Pipeline) downsize(ctx context.Context, key string, data []byte, meta map[string]string, cap int, res Result) (Result, error) {
+	start := time.Now()
+	if p.opts.KeepFull {
+		full := key + p.opts.FullSuffix
+		exists, err := p.store.Exists(ctx, full)
+		if err != nil {
+			return res, fmt.Errorf("stat %s: %w", full, err)
+		}
+		if !exists {
+			if err := p.store.Copy(ctx, key, full); err != nil {
+				return res, fmt.Errorf("keep full %s: %w", full, err)
+			}
+		}
+	}
+	display, displayWidth, err := fitWidth(data, cap, p.opts.DisplayQuality)
+	if err != nil {
+		return res, fmt.Errorf("fit %s: %w", key, err)
+	}
+	newMeta := make(map[string]string, len(meta)+1)
+	for k, v := range meta {
+		newMeta[k] = v
+	}
+	newMeta[MetaDisplayWidth] = strconv.Itoa(displayWidth)
+	if err := p.store.Put(ctx, key, display, "image/jpeg", newMeta); err != nil {
+		return res, fmt.Errorf("put %s: %w", key, err)
+	}
+	if p.purger != nil && p.opts.CDNBase != "" {
+		url := strings.TrimSuffix(p.opts.CDNBase, "/") + "/" + key
+		if err := p.purger.Purge(ctx, []string{url}); err != nil {
+			log.Printf("purge %s: %v", url, err)
+		}
+	}
+	res.Outcome = Downsized
+	res.NewWidth = displayWidth
+	res.Bytes = len(display)
 	res.Took = time.Since(start)
 	return res, nil
 }

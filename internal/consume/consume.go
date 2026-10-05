@@ -118,8 +118,8 @@ func PipelineHandler(p *pipeline.Pipeline, prefix string) Handler {
 			return err
 		}
 		switch res.Outcome {
-		case pipeline.Upscaled:
-			log.Printf("%s: %dpx -> %dpx, %d bytes, %s", key, res.Width, res.NewWidth, res.Bytes, res.Took.Round(1e6))
+		case pipeline.Upscaled, pipeline.Downsized:
+			log.Printf("%s: %s %dpx -> %dpx, %d bytes, %s", key, res.Outcome, res.Width, res.NewWidth, res.Bytes, res.Took.Round(1e6))
 		default:
 			log.Printf("%s: %s", key, res.Outcome)
 		}
