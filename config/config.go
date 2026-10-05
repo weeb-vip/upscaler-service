@@ -17,9 +17,12 @@ type Config struct {
 	// ModelsDir holds the .param/.bin pairs; empty means the binary's own default
 	// (a `models` directory beside it).
 	ModelsDir string
-	// Model is the network to run. realesrgan-x4plus-anime is trained on anime
-	// illustrations and on removing JPEG artefacts from them, which is exactly
-	// what the 225px MyAnimeList images are.
+	// Model is the network to run. realesrgan-x4plus is the general one: the
+	// catalogue is promotional posters that mix illustration, painted
+	// backgrounds, logos and typography, and the anime model redraws all of
+	// it as flat colour and clean strokes -- small text came out as invented
+	// letter shapes. The general model keeps text and gradients honest at the
+	// cost of slightly softer line art.
 	Model string
 	// Scale is the upscale factor the model was trained for.
 	Scale int
@@ -88,7 +91,7 @@ func Load() Config {
 		Port:           intEnv("PORT", 3000),
 		Binary:         env("UPSCALER_BINARY", "realesrgan-ncnn-vulkan"),
 		ModelsDir:      env("UPSCALER_MODELS_DIR", ""),
-		Model:          env("UPSCALER_MODEL", "realesrgan-x4plus-anime"),
+		Model:          env("UPSCALER_MODEL", "realesrgan-x4plus"),
 		Scale:          intEnv("UPSCALER_SCALE", 4),
 		GPU:            env("UPSCALER_GPU", "auto"),
 		Tile:           intEnv("UPSCALER_TILE", 0),

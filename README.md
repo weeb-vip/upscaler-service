@@ -1,9 +1,12 @@
 # upscaler-service
 
-Upscales anime artwork with [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN),
-using the `realesrgan-x4plus-anime` model: trained on anime illustrations and
-on removing JPEG artefacts from them, which is what the 225px MyAnimeList
-images the scraper stores need.
+Upscales artwork with [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN).
+The default model is the general `realesrgan-x4plus`: the catalogue is
+promotional posters that mix illustration, painted backgrounds, logos and
+typography, and the anime-trained model redraws all of it as flat colour and
+clean strokes, turning small text into invented letter shapes. The general
+model keeps text and gradients honest at the cost of slightly softer line
+art; `UPSCALER_MODEL=realesrgan-x4plus-anime` switches back.
 
 The service is a thin HTTP wrapper around the authors' `realesrgan-ncnn-vulkan`
 build. That build is one static executable that runs on a GPU through Vulkan
@@ -60,9 +63,9 @@ walks what is already in the bucket. Both apply the same rules:
 
 ## Models
 
-The ncnn build ships `realesrgan-x4plus-anime` (the default: illustrations,
-and the JPEG artefacts on them), `realesrgan-x4plus` (photos and general
-images; softer on line art) and `realesr-animevideov3-x2/x3/x4` (lighter
+The ncnn build ships `realesrgan-x4plus` (the default: general images,
+honest on text and gradients), `realesrgan-x4plus-anime` (illustrations and
+the JPEG artefacts on them; crisper line art, invents text) and `realesr-animevideov3-x2/x3/x4` (lighter
 networks for anime video frames; faster, smoother, less detail). Anything
 else -- waifu2x, Real-CUGAN, the community ESRGAN checkpoints -- needs its
 own runner; swap the binary and model name through the variables above.
@@ -74,7 +77,7 @@ own runner; swap the binary and model name through the variables above.
 | `PORT` | `3000` | |
 | `UPSCALER_BINARY` | `realesrgan-ncnn-vulkan` | Name on PATH or a path |
 | `UPSCALER_MODELS_DIR` | binary's default | The `.param`/`.bin` directory |
-| `UPSCALER_MODEL` | `realesrgan-x4plus-anime` | Also `realesrgan-x4plus`, `realesr-animevideov3-x{2,3,4}` |
+| `UPSCALER_MODEL` | `realesrgan-x4plus` | Also `realesrgan-x4plus-anime`, `realesr-animevideov3-x{2,3,4}` |
 | `UPSCALER_SCALE` | `4` | What the model was trained for |
 | `UPSCALER_GPU` | `auto` | Device index; `-1` forces CPU |
 | `UPSCALER_TILE` | `0` | Smaller tiles use less memory |

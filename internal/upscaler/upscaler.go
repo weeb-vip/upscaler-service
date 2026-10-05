@@ -46,7 +46,7 @@ func New(opts Options) *Upscaler {
 		opts.Binary = "realesrgan-ncnn-vulkan"
 	}
 	if opts.Model == "" {
-		opts.Model = "realesrgan-x4plus-anime"
+		opts.Model = "realesrgan-x4plus"
 	}
 	if opts.Scale == 0 {
 		opts.Scale = 4

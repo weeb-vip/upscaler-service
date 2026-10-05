@@ -24,11 +24,11 @@ func TestArgsSpellTheBinarysFlags(t *testing.T) {
 func TestDefaultsLeaveOptionalFlagsOut(t *testing.T) {
 	u := New(Options{})
 	got := strings.Join(u.Args("in", "out.png", 0), " ")
-	if got != "-i in -o out.png -n realesrgan-x4plus-anime -s 4 -f png" {
+	if got != "-i in -o out.png -n realesrgan-x4plus -s 4 -f png" {
 		t.Fatalf("unexpected args: %s", got)
 	}
 	// A per-call scale overrides the configured one.
-	if got := strings.Join(u.Args("in", "out.png", 2), " "); got != "-i in -o out.png -n realesrgan-x4plus-anime -s 2 -f png" {
+	if got := strings.Join(u.Args("in", "out.png", 2), " "); got != "-i in -o out.png -n realesrgan-x4plus -s 2 -f png" {
 		t.Fatalf("scale override: %s", got)
 	}
 	if u.Options().Timeout != 10*time.Minute {
