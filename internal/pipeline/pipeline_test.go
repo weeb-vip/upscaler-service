@@ -97,8 +97,8 @@ func TestANarrowImageIsUpscaledInPlaceWithTheOriginalKeptBesideIt(t *testing.T) 
 	if res.Outcome != Upscaled || res.Width != 225 || res.NewWidth != 900 {
 		t.Fatalf("result %+v", res)
 	}
-	if _, full := store.objs["weeb/posters/one-4x"]; full {
-		t.Error("no -4x copy is needed when the result is already within the cap")
+	if _, full := store.objs["weeb/posters/one-full"]; full {
+		t.Error("no -full copy is needed when the result is already within the cap")
 	}
 	if up.calls != 1 {
 		t.Errorf("upscaler called %d times", up.calls)
@@ -246,8 +246,8 @@ func TestTheKeyGetsADisplaySizeAndTheFullResultSitsBesideIt(t *testing.T) {
 	if store.objs["weeb/posters/one"].meta[MetaDisplayWidth] != "1000" {
 		t.Errorf("display-width meta: %v", store.objs["weeb/posters/one"].meta)
 	}
-	if w := widthOf(store.objs["weeb/posters/one-4x"].data); w != 2720 {
-		t.Errorf("full result at -4x is %dpx, want 2720", w)
+	if w := widthOf(store.objs["weeb/posters/one-full"].data); w != 2720 {
+		t.Errorf("full result at -full is %dpx, want 2720", w)
 	}
 	if _, kept := store.objs["weeb/posters/one-orig"]; !kept {
 		t.Error("the original should still be kept")
@@ -272,8 +272,8 @@ func TestAnOversizedEarlierResultIsBroughtDownWithoutUpscalingAgain(t *testing.T
 	if w := widthOf(store.objs["weeb/posters/one"].data); w != 1000 {
 		t.Errorf("key is %dpx, want 1000", w)
 	}
-	if w := widthOf(store.objs["weeb/posters/one-4x"].data); w != 2720 {
-		t.Errorf("the full result should have been kept at -4x first, got %dpx", w)
+	if w := widthOf(store.objs["weeb/posters/one-full"].data); w != 2720 {
+		t.Errorf("the full result should have been kept at -full first, got %dpx", w)
 	}
 	if store.objs["weeb/posters/one"].meta[MetaUpscaled] == "" {
 		t.Error("provenance lost")
@@ -291,7 +291,7 @@ func TestAnOversizedEarlierResultIsBroughtDownWithoutUpscalingAgain(t *testing.T
 
 func TestTheFullCopyIsNeverProcessedItself(t *testing.T) {
 	_, up, _, p := setup(225)
-	res, err := p.Handle(context.Background(), "weeb/posters/one-4x")
+	res, err := p.Handle(context.Background(), "weeb/posters/one-full")
 	if err != nil || res.Outcome != IsOriginal || up.calls != 0 {
 		t.Fatalf("%+v %v", res, err)
 	}

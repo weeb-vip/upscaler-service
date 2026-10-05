@@ -84,8 +84,8 @@ type Options struct {
 	// less invented detail; a 680px poster at 4x is 2720px.
 	Scales map[Kind]int
 	// DisplayWidths cap what is stored at the key, per kind; the full
-	// result is kept at <key><FullSuffix>. Nil means DefaultDisplayWidths;
-	// a kind set to 0 is not capped.
+	// result is kept at <key><FullSuffix> (default "-full"). Nil means
+	// DefaultDisplayWidths; a kind set to 0 is not capped.
 	DisplayWidths map[Kind]int
 	// KeepFull stores the uncapped result beside the key.
 	KeepFull   bool
@@ -125,7 +125,7 @@ func New(store bucket.Store, up Upscaler, purger purge.Purger, opts Options) *Pi
 		opts.DisplayWidths = DefaultDisplayWidths
 	}
 	if opts.FullSuffix == "" {
-		opts.FullSuffix = "-4x"
+		opts.FullSuffix = "-full"
 	}
 	if opts.DisplayQuality == 0 {
 		opts.DisplayQuality = 90

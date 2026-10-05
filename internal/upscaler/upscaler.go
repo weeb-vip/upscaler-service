@@ -49,7 +49,7 @@ func New(opts Options) *Upscaler {
 		opts.Model = "realesrgan-x4plus"
 	}
 	if opts.Scale == 0 {
-		opts.Scale = 4
+		opts.Scale = 2
 	}
 	if opts.Timeout == 0 {
 		opts.Timeout = 10 * time.Minute

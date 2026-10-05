@@ -41,7 +41,7 @@ walks what is already in the bucket. Both apply the same rules:
 2. Skip anything at least `UPSCALER_MIN_WIDTH` (1000px) wide. Every 225px
    MyAnimeList image and every 680px TheTVDB poster is below it.
 3. Copy the object to `<key>-orig` unless that copy exists.
-4. Upscale. The full result goes to `<key>-4x`; the key itself gets a
+4. Upscale. The full result goes to `<key>-full`; the key itself gets a
    copy capped at a display width per kind (600px roots, 1000px posters
    and works, 1920px banners), because the CDN serves objects as stored.
    Metadata is carried over (image-sync's `source-length` is what keeps
@@ -64,7 +64,7 @@ walks what is already in the bucket. Both apply the same rules:
 | `NATSURL`, `NATSCONSUMERGROUPNAME`, `NATSSUBJECT`, `NATSOFFSET` | `nats://localhost:4222`, `upscaler-service`, `image-stored`, `earliest` | |
 | `UPSCALER_WORKERS` | `1` | Concurrent upscales; one per GPU |
 | `UPSCALER_MAX_WIDTH_ANIME`, `_POSTER`, `_BANNER`, `_CHARACTER`, `_STAFF`, `_WORK` | 600, 1000, 1920, 600, 600, 1000 | Display width the object at the key is capped at |
-| `UPSCALER_KEEP_FULL` / `UPSCALER_DISPLAY_QUALITY` | `true` / `90` | Keep the uncapped result at `<key>-4x`; JPEG quality of the capped copy |
+| `UPSCALER_KEEP_FULL` / `UPSCALER_DISPLAY_QUALITY` | `true` / `90` | Keep the uncapped result at `<key>-full`; JPEG quality of the capped copy |
 | `UPSCALER_SCALE_ANIME`, `_POSTER`, `_BANNER`, `_CHARACTER`, `_STAFF`, `_WORK` | unset | Scale per kind (2, 3 or 4), read off the key's folder; unset means `UPSCALER_SCALE`. A 424px MyAnimeList image at 2x lands where a 225px one did at 4x, with far less invented detail |
 
 ## Models
@@ -84,7 +84,7 @@ own runner; swap the binary and model name through the variables above.
 | `UPSCALER_BINARY` | `realesrgan-ncnn-vulkan` | Name on PATH or a path |
 | `UPSCALER_MODELS_DIR` | binary's default | The `.param`/`.bin` directory |
 | `UPSCALER_MODEL` | `realesrgan-x4plus` | Also `realesrgan-x4plus-anime`, `realesr-animevideov3-x{2,3,4}` |
-| `UPSCALER_SCALE` | `4` | What the model was trained for |
+| `UPSCALER_SCALE` | `2` | 2, 3 or 4. The key is capped at a display width anyway, and 4x of a poster on lavapipe needs more than 3 GB |
 | `UPSCALER_GPU` | `auto` | Vulkan device index. There is no "CPU" value: a software Vulkan driver (Mesa's lavapipe) is device 0, which `auto` picks; `-1` makes the binary answer "invalid gpu device" |
 | `UPSCALER_TILE` | `0` | Smaller tiles use less memory |
 | `UPSCALER_FORMAT` | `png` | Default output when the request names none |

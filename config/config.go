@@ -24,7 +24,12 @@ type Config struct {
 	// letter shapes. The general model keeps text and gradients honest at the
 	// cost of slightly softer line art.
 	Model string
-	// Scale is the upscale factor the model was trained for.
+	// Scale is the factor to run at. 2 by default, not the model's native 4:
+	// the object at the key is capped at a display width anyway (1000px for
+	// a poster), so 4x of a 680px poster is 2720px of work thrown away --
+	// and on lavapipe that output needs more than 3 GB and gets the pod
+	// OOM-killed. 2x lands at 1360px, within the cap for banners and just
+	// above it for posters, for a quarter of the memory.
 	Scale int
 	// GPU is the Vulkan device index, or "auto" to let the binary pick. There
 	// is no CPU value: a software Vulkan driver (Mesa's lavapipe) presents
@@ -100,7 +105,7 @@ func Load() Config {
 		Binary:         env("UPSCALER_BINARY", "realesrgan-ncnn-vulkan"),
 		ModelsDir:      env("UPSCALER_MODELS_DIR", ""),
 		Model:          env("UPSCALER_MODEL", "realesrgan-x4plus"),
-		Scale:          intEnv("UPSCALER_SCALE", 4),
+		Scale:          intEnv("UPSCALER_SCALE", 2),
 		GPU:            env("UPSCALER_GPU", "auto"),
 		Tile:           intEnv("UPSCALER_TILE", 0),
 		Format:         env("UPSCALER_FORMAT", "png"),
