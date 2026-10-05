@@ -34,8 +34,12 @@ func newPipeline(cfg config.Config) (*pipeline.Pipeline, error) {
 	if cf := purge.NewCloudflare(cfg.CloudflareZoneID, cfg.CloudflareToken); cf != nil {
 		purger = cf
 	}
+	scales := make(map[pipeline.Kind]int, len(cfg.Pipeline.Scales))
+	for kind, n := range cfg.Pipeline.Scales {
+		scales[pipeline.Kind(kind)] = n
+	}
 	return pipeline.New(store, up, purger, pipeline.Options{
 		MinWidth: cfg.Pipeline.MinWidth, KeepOriginal: cfg.Pipeline.KeepOriginal, OrigSuffix: cfg.Pipeline.OrigSuffix,
-		Format: cfg.Pipeline.Format, CDNBase: cfg.Pipeline.CDNBase, Model: cfg.Model,
+		Format: cfg.Pipeline.Format, CDNBase: cfg.Pipeline.CDNBase, Model: cfg.Model, Scales: scales,
 	}), nil
 }

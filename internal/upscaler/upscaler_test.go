@@ -14,7 +14,7 @@ import (
 // pinned here rather than discovered in production.
 func TestArgsSpellTheBinarysFlags(t *testing.T) {
 	u := New(Options{Model: "realesrgan-x4plus-anime", Scale: 4, ModelsDir: "/m", GPU: "-1", Tile: 128})
-	got := strings.Join(u.Args("/in.jpg", "/out.webp"), " ")
+	got := strings.Join(u.Args("/in.jpg", "/out.webp", 0), " ")
 	want := "-i /in.jpg -o /out.webp -n realesrgan-x4plus-anime -s 4 -m /m -g -1 -t 128 -f webp"
 	if got != want {
 		t.Fatalf("args\n got %s\nwant %s", got, want)
@@ -23,9 +23,13 @@ func TestArgsSpellTheBinarysFlags(t *testing.T) {
 
 func TestDefaultsLeaveOptionalFlagsOut(t *testing.T) {
 	u := New(Options{})
-	got := strings.Join(u.Args("in", "out.png"), " ")
+	got := strings.Join(u.Args("in", "out.png", 0), " ")
 	if got != "-i in -o out.png -n realesrgan-x4plus-anime -s 4 -f png" {
 		t.Fatalf("unexpected args: %s", got)
+	}
+	// A per-call scale overrides the configured one.
+	if got := strings.Join(u.Args("in", "out.png", 2), " "); got != "-i in -o out.png -n realesrgan-x4plus-anime -s 2 -f png" {
+		t.Fatalf("scale override: %s", got)
 	}
 	if u.Options().Timeout != 10*time.Minute {
 		t.Errorf("default timeout should be 10m, got %s", u.Options().Timeout)
@@ -54,7 +58,7 @@ func TestBytesRoundTripsThroughTheBinary(t *testing.T) {
 		return os.WriteFile(seenOut, append([]byte("UP:"), data...), 0o600)
 	}
 
-	out, err := u.Bytes(context.Background(), []byte("pixels"), "png")
+	out, err := u.Bytes(context.Background(), []byte("pixels"), "png", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +71,7 @@ func TestBytesRoundTripsThroughTheBinary(t *testing.T) {
 }
 
 func TestBytesRejectsAFormatTheBinaryCannotWrite(t *testing.T) {
-	if _, err := New(Options{}).Bytes(context.Background(), []byte("x"), "gif"); err == nil {
+	if _, err := New(Options{}).Bytes(context.Background(), []byte("x"), "gif", 0); err == nil {
 		t.Fatal("gif should be refused")
 	}
 }
@@ -75,7 +79,7 @@ func TestBytesRejectsAFormatTheBinaryCannotWrite(t *testing.T) {
 func TestAnEmptyOutputIsAFailureNotASuccess(t *testing.T) {
 	u := New(Options{})
 	u.run = func(_ context.Context, cmd *exec.Cmd) error { return nil } // wrote nothing
-	if _, err := u.Bytes(context.Background(), []byte("x"), "png"); err == nil {
+	if _, err := u.Bytes(context.Background(), []byte("x"), "png", 0); err == nil {
 		t.Fatal("a run that produced no file must fail")
 	}
 }

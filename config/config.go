@@ -5,6 +5,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -65,6 +66,9 @@ type PipelineConfig struct {
 	Format string
 	// CDNBase is the public origin objects are served from, for the purge.
 	CDNBase string
+	// Scales per kind (anime, poster, banner, character, staff, work); a kind
+	// left out uses UPSCALER_SCALE.
+	Scales map[string]int
 }
 
 type NatsConfig struct {
@@ -105,6 +109,7 @@ func Load() Config {
 			OrigSuffix:   env("UPSCALER_ORIG_SUFFIX", "-orig"),
 			Format:       env("UPSCALER_BUCKET_FORMAT", "jpg"),
 			CDNBase:      env("CDN_BASE_URL", "https://cdn.weeb.vip"),
+			Scales:       scalesByKind(),
 		},
 		Nats: NatsConfig{
 			URL:               env("NATSURL", "nats://localhost:4222"),
@@ -117,6 +122,18 @@ func Load() Config {
 		CloudflareZoneID: env("CLOUDFLARE_ZONE_ID", ""),
 		CloudflareToken:  env("CLOUDFLARE_API_TOKEN", ""),
 	}
+}
+
+// UPSCALER_SCALE_ANIME=2 and friends: one variable per kind, read only when
+// set, so the runner's default covers the rest.
+func scalesByKind() map[string]int {
+	out := map[string]int{}
+	for _, kind := range []string{"anime", "poster", "banner", "character", "staff", "work"} {
+		if n := intEnv("UPSCALER_SCALE_"+strings.ToUpper(kind), 0); n > 0 {
+			out[kind] = n
+		}
+	}
+	return out
 }
 
 func env(name, fallback string) string {

@@ -24,7 +24,42 @@ import (
 
 // Upscaler is the one method of the Real-ESRGAN runner the pipeline uses.
 type Upscaler interface {
-	Bytes(ctx context.Context, image []byte, format string) ([]byte, error)
+	Bytes(ctx context.Context, image []byte, format string, scale int) ([]byte, error)
+}
+
+// Kind is what an object is, read off its key: the folder image-sync stores
+// each type under. Root objects are the anime's own MyAnimeList image.
+type Kind string
+
+const (
+	KindAnime     Kind = "anime"
+	KindPoster    Kind = "poster"
+	KindBanner    Kind = "banner"
+	KindCharacter Kind = "character"
+	KindStaff     Kind = "staff"
+	KindWork      Kind = "work"
+)
+
+// KindOf reads the kind from a key such as weeb/posters/<id>. The prefix is
+// everything before the last folder, so staging's weeb-staging/ works too.
+func KindOf(key string) Kind {
+	parts := strings.Split(strings.Trim(key, "/"), "/")
+	if len(parts) < 3 {
+		return KindAnime
+	}
+	switch parts[len(parts)-2] {
+	case "posters":
+		return KindPoster
+	case "banners":
+		return KindBanner
+	case "characters":
+		return KindCharacter
+	case "staff":
+		return KindStaff
+	case "works":
+		return KindWork
+	}
+	return KindAnime
 }
 
 type Options struct {
@@ -44,6 +79,10 @@ type Options struct {
 	CDNBase string
 	// Model names what did the work, recorded on the object.
 	Model string
+	// Scale per kind; 0 or absent means the runner's default. A 424px
+	// MyAnimeList image at 2x lands where a 225px one did at 4x, with far
+	// less invented detail; a 680px poster at 4x is 2720px.
+	Scales map[Kind]int
 }
 
 // Metadata written on a replaced object. image-sync's `source-length` is
@@ -141,7 +180,8 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 		}
 	}
 
-	out, err := p.up.Bytes(ctx, data, p.opts.Format)
+	scale := p.opts.Scales[KindOf(key)]
+	out, err := p.up.Bytes(ctx, data, p.opts.Format, scale)
 	if err != nil {
 		return res, fmt.Errorf("upscale %s: %w", key, err)
 	}
@@ -155,6 +195,9 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 		newMeta[k] = v
 	}
 	newMeta[MetaUpscaled] = p.opts.Model
+	if scale > 0 {
+		newMeta[MetaUpscaled] = fmt.Sprintf("%s x%d", p.opts.Model, scale)
+	}
 	newMeta[MetaFromWidth] = strconv.Itoa(cfg.Width)
 	newMeta[MetaUpscaledAt] = time.Now().UTC().Format(time.RFC3339)
 	if err := p.store.Put(ctx, key, out, contentTypeFor(p.opts.Format), newMeta); err != nil {

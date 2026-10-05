@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,7 +52,7 @@ POST /upscale
 
 The image is the request: either a multipart form with an `image` field, or
 the raw bytes with an image Content-Type. `?format=png|jpg|webp` picks the
-output; the default is the service's. The response is the image itself, so
+output and `?scale=2|3|4` the factor; the defaults are the service's. The response is the image itself, so
 `curl --data-binary @in.jpg -o out.png` is the whole client.
 */
 func (s *Server) upscale(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +75,12 @@ func (s *Server) upscale(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	out, err := s.up.Bytes(r.Context(), data, format)
+	scale, _ := strconv.Atoi(r.URL.Query().Get("scale"))
+	if scale != 0 && (scale < 2 || scale > 4) {
+		http.Error(w, "scale must be 2, 3 or 4", http.StatusBadRequest)
+		return
+	}
+	out, err := s.up.Bytes(r.Context(), data, format, scale)
 	if err != nil {
 		if r.Context().Err() == context.Canceled {
 			return

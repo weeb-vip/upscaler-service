@@ -18,8 +18,11 @@ or on a CPU through a software Vulkan driver; no Python, no CUDA.
 
 ```sh
 curl --data-binary @poster.jpg -H 'Content-Type: image/jpeg' \
-     'http://localhost:3000/upscale?format=webp' -o poster-4x.webp
+     'http://localhost:3000/upscale?format=webp&scale=2' -o poster-2x.webp
 ```
+
+`scale` is 2, 3 or 4 (the x4 models downscale their output for 2 and 3);
+the default is the service's.
 
 The CLI does the same for one file: `./main upscale in.jpg out.png`.
 
@@ -53,6 +56,7 @@ walks what is already in the bucket. Both apply the same rules:
 | `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_API_TOKEN` | unset | Purge off when unset |
 | `NATSURL`, `NATSCONSUMERGROUPNAME`, `NATSSUBJECT`, `NATSOFFSET` | `nats://localhost:4222`, `upscaler-service`, `image-stored`, `earliest` | |
 | `UPSCALER_WORKERS` | `1` | Concurrent upscales; one per GPU |
+| `UPSCALER_SCALE_ANIME`, `_POSTER`, `_BANNER`, `_CHARACTER`, `_STAFF`, `_WORK` | unset | Scale per kind (2, 3 or 4), read off the key's folder; unset means `UPSCALER_SCALE`. A 424px MyAnimeList image at 2x lands where a 225px one did at 4x, with far less invented detail |
 
 ## Models
 

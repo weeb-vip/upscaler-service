@@ -70,9 +70,14 @@ func (u *Upscaler) Check() error {
 
 // Args is the command line for one file, in the binary's own flag spelling.
 // Exposed so a test can pin it: a flag that drifts here silently produces
-// the wrong model or scale with no error from the binary.
-func (u *Upscaler) Args(in, out string) []string {
-	args := []string{"-i", in, "-o", out, "-n", u.opts.Model, "-s", strconv.Itoa(u.opts.Scale)}
+// the wrong model or scale with no error from the binary. A scale of 0
+// means the configured default; the x4 models accept 2 and 3 as well, by
+// downscaling their output.
+func (u *Upscaler) Args(in, out string, scale int) []string {
+	if scale <= 0 {
+		scale = u.opts.Scale
+	}
+	args := []string{"-i", in, "-o", out, "-n", u.opts.Model, "-s", strconv.Itoa(scale)}
 	if u.opts.ModelsDir != "" {
 		args = append(args, "-m", u.opts.ModelsDir)
 	}
@@ -89,12 +94,12 @@ func (u *Upscaler) Args(in, out string) []string {
 }
 
 // File upscales one image on disk into another. The output's extension picks
-// the format.
-func (u *Upscaler) File(ctx context.Context, in, out string) error {
+// the format; scale 0 is the configured default.
+func (u *Upscaler) File(ctx context.Context, in, out string, scale int) error {
 	ctx, cancel := context.WithTimeout(ctx, u.opts.Timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, u.opts.Binary, u.Args(in, out)...)
+	cmd := exec.CommandContext(ctx, u.opts.Binary, u.Args(in, out, scale)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	cmd.Stdout = &stderr
@@ -111,8 +116,9 @@ func (u *Upscaler) File(ctx context.Context, in, out string) error {
 	return nil
 }
 
-// Bytes upscales an in-memory image and returns the result in `format`.
-func (u *Upscaler) Bytes(ctx context.Context, image []byte, format string) ([]byte, error) {
+// Bytes upscales an in-memory image and returns the result in `format`;
+// scale 0 is the configured default.
+func (u *Upscaler) Bytes(ctx context.Context, image []byte, format string, scale int) ([]byte, error) {
 	if !Formats[format] {
 		return nil, fmt.Errorf("unsupported output format %q (png, jpg or webp)", format)
 	}
@@ -129,7 +135,7 @@ func (u *Upscaler) Bytes(ctx context.Context, image []byte, format string) ([]by
 	if err := os.WriteFile(in, image, 0o600); err != nil {
 		return nil, err
 	}
-	if err := u.File(ctx, in, out); err != nil {
+	if err := u.File(ctx, in, out, scale); err != nil {
 		return nil, err
 	}
 	return os.ReadFile(out)

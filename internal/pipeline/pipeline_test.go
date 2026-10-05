@@ -44,14 +44,22 @@ func (m *memStore) List(context.Context, string) <-chan bucket.Entry {
 	return ch
 }
 
-type fakeUp struct{ calls int }
+type fakeUp struct {
+	calls int
+	scale int
+}
 
-// Produces a PNG four times as wide as asked, whatever the format name.
-func (f *fakeUp) Bytes(_ context.Context, in []byte, _ string) ([]byte, error) {
+// Produces a PNG `scale` times as wide as asked (4 when unset), whatever
+// the format name, and remembers the scale it was asked for.
+func (f *fakeUp) Bytes(_ context.Context, in []byte, _ string, scale int) ([]byte, error) {
 	f.calls++
+	f.scale = scale
+	if scale == 0 {
+		scale = 4
+	}
 	cfg, _, _ := image.DecodeConfig(bytes.NewReader(in))
 	var buf bytes.Buffer
-	png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, cfg.Width*4, cfg.Height*4)))
+	png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, cfg.Width*scale, cfg.Height*scale)))
 	return buf.Bytes(), nil
 }
 
@@ -163,5 +171,45 @@ func TestSomethingThatIsNotAnImageIsReportedNotRetried(t *testing.T) {
 	res, err := p.Handle(context.Background(), "weeb/posters/one")
 	if err != nil || res.Outcome != Undecodable || up.calls != 0 {
 		t.Fatalf("%+v %v", res, err)
+	}
+}
+
+func TestKindIsReadOffTheKey(t *testing.T) {
+	cases := map[string]Kind{
+		"weeb/abc":                 KindAnime,
+		"weeb-staging/abc":         KindAnime,
+		"weeb/posters/abc":         KindPoster,
+		"weeb-staging/banners/abc": KindBanner,
+		"weeb/characters/abc":      KindCharacter,
+		"weeb/staff/abc":           KindStaff,
+		"weeb/works/abc":           KindWork,
+		"weeb/somethingelse/abc":   KindAnime,
+	}
+	for key, want := range cases {
+		if got := KindOf(key); got != want {
+			t.Errorf("%s -> %s, want %s", key, got, want)
+		}
+	}
+}
+
+func TestScaleFollowsTheKind(t *testing.T) {
+	store := &memStore{objs: map[string]obj{
+		"weeb/one":         {jpegOf(424, 600), "image/jpeg", nil},
+		"weeb/posters/one": {jpegOf(680, 1000), "image/jpeg", nil},
+	}}
+	up := &fakeUp{}
+	p := New(store, up, nil, Options{Model: "m", Scales: map[Kind]int{KindAnime: 2}})
+
+	res, _ := p.Handle(context.Background(), "weeb/one")
+	if up.scale != 2 || res.NewWidth != 848 {
+		t.Errorf("root image: asked scale %d, got %dpx", up.scale, res.NewWidth)
+	}
+	if got := store.objs["weeb/one"].meta[MetaUpscaled]; got != "m x2" {
+		t.Errorf("provenance should name the scale, got %q", got)
+	}
+
+	res, _ = p.Handle(context.Background(), "weeb/posters/one")
+	if up.scale != 0 || res.NewWidth != 2720 {
+		t.Errorf("poster: asked scale %d, got %dpx (default is the runner's)", up.scale, res.NewWidth)
 	}
 }

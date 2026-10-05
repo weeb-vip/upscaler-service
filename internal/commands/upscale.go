@@ -20,7 +20,7 @@ var upscaleCmd = &cobra.Command{
 			return err
 		}
 		start := time.Now()
-		if err := up.File(context.Background(), args[0], args[1]); err != nil {
+		if err := up.File(context.Background(), args[0], args[1], upscaleScale); err != nil {
 			return err
 		}
 		fmt.Printf("%s -> %s (%s, x%d, %s)\n", args[0], args[1], cfg.Model, cfg.Scale, time.Since(start).Round(time.Millisecond))
@@ -28,6 +28,9 @@ var upscaleCmd = &cobra.Command{
 	},
 }
 
+var upscaleScale int
+
 func init() {
+	upscaleCmd.Flags().IntVar(&upscaleScale, "scale", 0, "2, 3 or 4; default is UPSCALER_SCALE")
 	rootCmd.AddCommand(upscaleCmd)
 }
