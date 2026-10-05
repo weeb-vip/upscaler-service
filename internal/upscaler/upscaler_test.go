@@ -13,9 +13,9 @@ import (
 // The binary reports nothing useful for a wrong flag, so the command line is
 // pinned here rather than discovered in production.
 func TestArgsSpellTheBinarysFlags(t *testing.T) {
-	u := New(Options{Model: "realesrgan-x4plus-anime", Scale: 4, ModelsDir: "/m", GPU: "-1", Tile: 128})
+	u := New(Options{Model: "realesrgan-x4plus-anime", Scale: 4, ModelsDir: "/m", GPU: "-1", Tile: 128, Threads: "1:2:1"})
 	got := strings.Join(u.Args("/in.jpg", "/out.webp", 0), " ")
-	want := "-i /in.jpg -o /out.webp -n realesrgan-x4plus-anime -s 4 -m /m -g -1 -t 128 -f webp"
+	want := "-i /in.jpg -o /out.webp -n realesrgan-x4plus-anime -s 4 -m /m -g -1 -t 128 -j 1:2:1 -f webp"
 	if got != want {
 		t.Fatalf("args\n got %s\nwant %s", got, want)
 	}

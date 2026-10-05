@@ -37,6 +37,10 @@ type Config struct {
 	GPU string
 	// Tile size; 0 lets the binary decide. Smaller tiles need less memory.
 	Tile int
+	// Threads is the binary's -j load:proc:save; empty lets it decide.
+	// Processing threads are what the software Vulkan driver's memory
+	// scales with.
+	Threads string
 	// Format of the produced image: png, jpg or webp.
 	Format string
 	// Timeout for one image. CPU runs of a large image can take minutes.
@@ -108,6 +112,7 @@ func Load() Config {
 		Scale:          intEnv("UPSCALER_SCALE", 2),
 		GPU:            env("UPSCALER_GPU", "auto"),
 		Tile:           intEnv("UPSCALER_TILE", 0),
+		Threads:        env("UPSCALER_THREADS", ""),
 		Format:         env("UPSCALER_FORMAT", "png"),
 		Timeout:        durationEnv("UPSCALER_TIMEOUT", 10*time.Minute),
 		MaxUploadBytes: int64(intEnv("UPSCALER_MAX_UPLOAD_MB", 20)) << 20,

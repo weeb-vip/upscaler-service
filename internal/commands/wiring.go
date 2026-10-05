@@ -13,7 +13,7 @@ import (
 func newUpscaler(cfg config.Config) *upscaler.Upscaler {
 	return upscaler.New(upscaler.Options{
 		Binary: cfg.Binary, ModelsDir: cfg.ModelsDir, Model: cfg.Model, Scale: cfg.Scale,
-		GPU: cfg.GPU, Tile: cfg.Tile, Timeout: cfg.Timeout,
+		GPU: cfg.GPU, Tile: cfg.Tile, Threads: cfg.Threads, Timeout: cfg.Timeout,
 	})
 }
 

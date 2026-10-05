@@ -87,6 +87,7 @@ own runner; swap the binary and model name through the variables above.
 | `UPSCALER_SCALE` | `2` | 2, 3 or 4. The key is capped at a display width anyway, and 4x of a poster on lavapipe needs more than 3 GB |
 | `UPSCALER_GPU` | `auto` | Vulkan device index. There is no "CPU" value: a software Vulkan driver (Mesa's lavapipe) is device 0, which `auto` picks; `-1` makes the binary answer "invalid gpu device" |
 | `UPSCALER_TILE` | `0` | Smaller tiles use less memory |
+| `UPSCALER_THREADS` | unset | The binary's `-j load:proc:save`, e.g. `1:2:1`. Processing threads are what lavapipe's memory scales with |
 | `UPSCALER_FORMAT` | `png` | Default output when the request names none |
 | `UPSCALER_TIMEOUT` | `10m` | Per image |
 | `UPSCALER_MAX_UPLOAD_MB` | `20` | |

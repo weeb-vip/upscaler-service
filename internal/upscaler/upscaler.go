@@ -29,6 +29,10 @@ type Options struct {
 	// GPU is "auto", or a device index; "-1" forces the CPU.
 	GPU     string
 	Tile    int
+	// Threads is the binary's -j load:proc:save. Processing threads are
+	// what lavapipe's memory scales with: each one carries its own working
+	// set, so fewer threads is the lever when a run is OOM-killed.
+	Threads string
 	Timeout time.Duration
 }
 
@@ -86,6 +90,9 @@ func (u *Upscaler) Args(in, out string, scale int) []string {
 	}
 	if u.opts.Tile > 0 {
 		args = append(args, "-t", strconv.Itoa(u.opts.Tile))
+	}
+	if u.opts.Threads != "" {
+		args = append(args, "-j", u.opts.Threads)
 	}
 	if ext := strings.TrimPrefix(filepath.Ext(out), "."); Formats[ext] {
 		args = append(args, "-f", ext)
