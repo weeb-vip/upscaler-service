@@ -373,3 +373,23 @@ func TestUntouchedObjectsAreNormalisedForDisplayOnce(t *testing.T) {
 		}
 	}
 }
+
+// A source already at its kind's display width gains nothing from the
+// model: 600px staff photo in, 600px out, 26 seconds of CPU for nothing.
+func TestASourceAtItsDisplayCapIsNotUpscaled(t *testing.T) {
+	store := &memStore{objs: map[string]obj{
+		"weeb/staff/one": {jpegOf(600, 800), "image/jpeg", nil},
+		"weeb/staff/two": {jpegOf(386, 500), "image/jpeg", nil},
+	}}
+	up := &fakeUp{}
+	p := New(store, up, nil, Options{})
+
+	res, _ := p.Handle(context.Background(), "weeb/staff/one")
+	if res.Outcome != AlreadyWide || up.calls != 0 {
+		t.Errorf("600px staff at the 600px cap: %+v, upscaler calls %d", res, up.calls)
+	}
+	res, _ = p.Handle(context.Background(), "weeb/staff/two")
+	if res.Outcome != Upscaled || res.NewWidth != 600 || up.calls != 1 {
+		t.Errorf("386px staff below the cap: %+v, upscaler calls %d", res, up.calls)
+	}
+}

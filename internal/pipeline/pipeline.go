@@ -202,7 +202,12 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 		res.Outcome = AlreadyUpscaled
 		return res, nil
 	}
-	if cfg.Width >= p.opts.MinWidth {
+	// Nothing to gain from the model once the source is already at the
+	// width the key is capped to: a 600px staff photo upscaled to 1200px and
+	// capped back to 600px was 26 seconds for the same pixels. Such an
+	// object only gets the display treatment below.
+	atCap := cap > 0 && cfg.Width >= cap
+	if cfg.Width >= p.opts.MinWidth || atCap {
 		// Not upscaled, but still served as stored: a 1920px banner or a
 		// heavy poster gets the same display treatment, once.
 		if meta[MetaNormalized] == "" && cap > 0 && cfg.Width > cap {
