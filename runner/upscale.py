@@ -81,7 +81,12 @@ def main() -> int:
     src = Image.open(a.i).convert("RGB")
     img = np.asarray(src, dtype=np.float32) / 255.0
     sess = session(model_path, threads)
-    out = run_tiled(sess, img, tile)
+    out = np.nan_to_num(run_tiled(sess, img, tile), nan=0.0, posinf=1.0, neginf=0.0)
+    if img.max() > 0.02 and out.max() <= 0.02:
+        # A black frame for a picture is a broken run, not a result; the
+        # ncnn Vulkan build used to write exactly that and call it done.
+        print("upscale produced an all-black image", file=sys.stderr)
+        return 3
     result = Image.fromarray(np.clip(out * 255.0 + 0.5, 0, 255).astype(np.uint8))
     if a.s != NATIVE_SCALE:
         result = result.resize((src.width * a.s, src.height * a.s), Image.LANCZOS)

@@ -41,7 +41,14 @@ walks what is already in the bucket. Both apply the same rules:
 
 1. Skip `<key>-orig` copies, and anything already carrying `upscaled`
    metadata (a 225px image comes back at 900px, still under the width
-   threshold, so provenance is what stops a replayed event).
+   threshold, so provenance is what stops a replayed event). One exception:
+   an `upscaled` object that is all black is a broken run, not a result
+   (the ncnn Vulkan builds of 1.5.0-1.7.0 wrote exactly that when lavapipe
+   ran out of memory). When `<key>-orig` exists and is a picture, it goes
+   back to the key and is upscaled again (outcome `repaired`); without a
+   usable original the object is reported as `blank` and left alone. And
+   a run that answers a picture with a black frame is an error: the key is
+   not touched and the event goes round the retry stream.
 2. Anything at least `UPSCALER_MIN_WIDTH` (1000px) wide is not upscaled,
    but is still normalised for display, once: brought down to its kind's
    display width if wider, re-encoded as JPEG at `UPSCALER_DISPLAY_QUALITY`
@@ -132,6 +139,8 @@ poster upscales to 900x1272 in about a second.
 
 ## In the cluster
 
-The image installs Mesa's lavapipe, so a pod with no GPU still works, only
-slowly (expect tens of seconds per poster). A node with a GPU and its Vulkan
-ICD mounted makes the same image fast; nothing in the service changes.
+The image runs the ONNX model on the CPU (see "The CPU runner"): a 424px
+MyAnimeList image at 2x takes about 35 seconds on one 4-thread worker of a
+2013 Xeon, within 2 GB. There is no Vulkan in the image any more; the
+lavapipe builds needed more than 3 GB per poster and wrote black frames
+when they could not get it.

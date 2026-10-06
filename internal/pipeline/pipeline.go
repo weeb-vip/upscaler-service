@@ -152,6 +152,11 @@ const (
 	AlreadyUpscaled Outcome = "already-upscaled"
 	IsOriginal      Outcome = "is-original-copy"
 	Undecodable     Outcome = "undecodable"
+	// Repaired: an earlier result at the key was all black, the original
+	// beside it was not, so the original went back and was upscaled again.
+	Repaired Outcome = "repaired"
+	// Blank: an all-black object with no usable original to restore from.
+	Blank Outcome = "blank"
 )
 
 // MetaNormalized marks an object the pipeline has sized and compressed for
@@ -192,6 +197,31 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 	}
 	res.Width = cfg.Width
 	cap := p.opts.DisplayWidths[KindOf(key)]
+	repaired := false
+	if meta[MetaUpscaled] != "" && isBlank(data) {
+		// The ncnn Vulkan builds wrote an all-black result when the device
+		// ran out of memory, and marked it done. The original beside the
+		// key is what the model should have seen; put it back and go again.
+		orig, origMeta, ok, err := p.usableOriginal(ctx, key)
+		if err != nil {
+			return res, err
+		}
+		if !ok {
+			res.Outcome = Blank
+			return res, nil
+		}
+		if err := p.store.Put(ctx, key, orig, contentTypeOf(orig), origMeta); err != nil {
+			return res, fmt.Errorf("restore %s: %w", key, err)
+		}
+		log.Printf("%s: all-black result restored from %s%s", key, key, p.opts.OrigSuffix)
+		data, meta = orig, origMeta
+		if cfg, _, err = image.DecodeConfig(bytes.NewReader(data)); err != nil {
+			res.Outcome = Undecodable
+			return res, nil
+		}
+		res.Width = cfg.Width
+		repaired = true
+	}
 	if meta[MetaUpscaled] != "" {
 		// Done before, but possibly before objects were capped: a 2720px
 		// result sitting at the key is brought down to display size, with
@@ -242,6 +272,11 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 	if err != nil {
 		return res, fmt.Errorf("upscale %s produced an undecodable image: %w", key, err)
 	}
+	if isBlank(out) && !isBlank(data) {
+		// Never let a black frame replace a picture: an error here keeps
+		// the key as it is and sends the event round the retry stream.
+		return res, fmt.Errorf("upscale %s produced an all-black image", key)
+	}
 
 	newMeta := make(map[string]string, len(meta)+4)
 	for k, v := range meta {
@@ -285,10 +320,39 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 	}
 
 	res.Outcome = Upscaled
+	if repaired {
+		res.Outcome = Repaired
+	}
 	res.NewWidth = outCfg.Width
 	res.Bytes = len(out)
 	res.Took = time.Since(start)
 	return res, nil
+}
+
+// usableOriginal fetches <key><OrigSuffix> when it exists and is a picture
+// rather than another black frame, with the pipeline's own provenance
+// stripped from its metadata so the key reads as untouched again.
+func (p *Pipeline) usableOriginal(ctx context.Context, key string) ([]byte, map[string]string, bool, error) {
+	orig := key + p.opts.OrigSuffix
+	exists, err := p.store.Exists(ctx, orig)
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("stat %s: %w", orig, err)
+	}
+	if !exists {
+		return nil, nil, false, nil
+	}
+	data, _, meta, err := p.store.Get(ctx, orig)
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("get %s: %w", orig, err)
+	}
+	if _, _, err := image.DecodeConfig(bytes.NewReader(data)); err != nil || isBlank(data) {
+		return nil, nil, false, nil
+	}
+	clean := copyMeta(meta)
+	for _, k := range []string{MetaUpscaled, MetaFromWidth, MetaUpscaledAt, MetaDisplayWidth, MetaNormalized} {
+		delete(clean, k)
+	}
+	return data, clean, true, nil
 }
 
 // downsize brings an object at the key down to the display cap. For an

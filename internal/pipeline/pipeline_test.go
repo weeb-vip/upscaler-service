@@ -59,6 +59,21 @@ func (f *fakeUp) Bytes(_ context.Context, in []byte, _ string, scale int) ([]byt
 	}
 	cfg, _, _ := image.DecodeConfig(bytes.NewReader(in))
 	var buf bytes.Buffer
+	png.Encode(&buf, lit(cfg.Width*scale, cfg.Height*scale))
+	return buf.Bytes(), nil
+}
+
+// blackUp is a runner that writes black frames, as the ncnn Vulkan build
+// did when the device could not allocate memory.
+type blackUp struct{ calls int }
+
+func (f *blackUp) Bytes(_ context.Context, in []byte, _ string, scale int) ([]byte, error) {
+	f.calls++
+	if scale == 0 {
+		scale = 4
+	}
+	cfg, _, _ := image.DecodeConfig(bytes.NewReader(in))
+	var buf bytes.Buffer
 	png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, cfg.Width*scale, cfg.Height*scale)))
 	return buf.Bytes(), nil
 }
@@ -70,7 +85,23 @@ func (f *fakePurge) Purge(_ context.Context, urls []string) error {
 	return nil
 }
 
+// lit is a picture rather than a black frame: a mid-grey field with a
+// bright stripe, so the blank check sees something.
+func lit(w, h int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for i := 0; i < len(img.Pix); i += 4 {
+		img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = 120, 80, 160, 255
+	}
+	return img
+}
+
 func jpegOf(w, h int) []byte {
+	var buf bytes.Buffer
+	jpeg.Encode(&buf, lit(w, h), nil)
+	return buf.Bytes()
+}
+
+func blackJpegOf(w, h int) []byte {
 	var buf bytes.Buffer
 	jpeg.Encode(&buf, image.NewRGBA(image.Rect(0, 0, w, h)), nil)
 	return buf.Bytes()
@@ -391,5 +422,121 @@ func TestASourceAtItsDisplayCapIsNotUpscaled(t *testing.T) {
 	res, _ = p.Handle(context.Background(), "weeb/staff/two")
 	if res.Outcome != Upscaled || res.NewWidth != 600 || up.calls != 1 {
 		t.Errorf("386px staff below the cap: %+v, upscaler calls %d", res, up.calls)
+	}
+}
+
+// The lavapipe deployments (1.5.0-1.7.0) wrote all-black results and
+// marked them done, with the untouched original beside the key. A walk
+// over the bucket puts the original back and upscales it again.
+func TestABlackEarlierResultIsRestoredFromTheOriginalAndUpscaledAgain(t *testing.T) {
+	store, up, pg, p := setup(424)
+	done := map[string]string{"source-length": "12345", MetaUpscaled: "realesr-general-x4v3 x2", MetaFromWidth: "424", MetaNormalized: "1", MetaDisplayWidth: "600"}
+	store.objs["weeb/one"] = obj{blackJpegOf(600, 849), "image/jpeg", done}
+	store.objs["weeb/one-full"] = obj{blackJpegOf(848, 1200), "image/jpeg", done}
+	store.objs["weeb/one-orig"] = obj{jpegOf(424, 600), "image/jpeg", map[string]string{"source-length": "12345"}}
+
+	res, err := p.Handle(context.Background(), "weeb/one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != Repaired || res.Width != 424 || res.NewWidth != 600 || up.calls != 1 {
+		t.Fatalf("result %+v, upscaler calls %d", res, up.calls)
+	}
+	// upscaled at the fake's 4x and capped to 600; the full result replaced the black one too
+	for _, k := range []string{"weeb/one", "weeb/one-full"} {
+		if isBlank(store.objs[k].data) {
+			t.Errorf("%s is still black", k)
+		}
+	}
+	if w := widthOf(store.objs["weeb/one-full"].data); w != 1696 {
+		t.Errorf("full result %dpx", w)
+	}
+	got := store.objs["weeb/one"].meta
+	if got[MetaUpscaled] != "realesrgan-x4plus-anime" || got[MetaFromWidth] != "424" || got["source-length"] != "12345" {
+		t.Errorf("metadata after repair: %v", got)
+	}
+	if len(store.objs["weeb/one-orig"].data) != len(jpegOf(424, 600)) {
+		t.Error("the original copy was touched")
+	}
+	if len(pg.urls) != 1 {
+		t.Errorf("purged %v", pg.urls)
+	}
+	// And it is done: a second pass sees a lit, marked result.
+	res, _ = p.Handle(context.Background(), "weeb/one")
+	if res.Outcome != AlreadyUpscaled || up.calls != 1 {
+		t.Errorf("second pass %+v, calls %d", res, up.calls)
+	}
+}
+
+func TestABlackResultWithNoUsableOriginalIsReportedAndLeftAlone(t *testing.T) {
+	store, up, _, p := setup(424)
+	done := map[string]string{MetaUpscaled: "realesr-general-x4v3 x2"}
+	store.objs["weeb/none"] = obj{blackJpegOf(600, 849), "image/jpeg", done}
+	store.objs["weeb/both"] = obj{blackJpegOf(600, 849), "image/jpeg", done}
+	store.objs["weeb/both-orig"] = obj{blackJpegOf(424, 600), "image/jpeg", nil}
+
+	for _, k := range []string{"weeb/none", "weeb/both"} {
+		res, err := p.Handle(context.Background(), k)
+		if err != nil || res.Outcome != Blank {
+			t.Errorf("%s: %+v %v", k, res, err)
+		}
+		if !isBlank(store.objs[k].data) {
+			t.Errorf("%s was rewritten", k)
+		}
+	}
+	if up.calls != 0 {
+		t.Errorf("upscaler called %d times", up.calls)
+	}
+}
+
+// A runner that answers a picture with a black frame is a failed run, not
+// a result: the key keeps its original and the error goes round the retry.
+func TestABlackUpscaleIsRejectedAndTheKeyKeptAsItWas(t *testing.T) {
+	store, _, pg, _ := setup(225)
+	up := &blackUp{}
+	p := New(store, up, pg, Options{KeepOriginal: true, KeepFull: true, CDNBase: "https://cdn.weeb.vip"})
+	before := store.objs["weeb/posters/one"]
+
+	res, err := p.Handle(context.Background(), "weeb/posters/one")
+	if err == nil || res.Outcome == Upscaled {
+		t.Fatalf("expected an error, got %+v %v", res, err)
+	}
+	after := store.objs["weeb/posters/one"]
+	if len(after.data) != len(before.data) || after.meta[MetaUpscaled] != "" {
+		t.Error("the key was replaced with the black result")
+	}
+	if _, full := store.objs["weeb/posters/one-full"]; full {
+		t.Error("a black full result was stored")
+	}
+	if len(pg.urls) != 0 {
+		t.Errorf("purged %v", pg.urls)
+	}
+}
+
+func TestBlankTellsABlackFrameFromADarkPicture(t *testing.T) {
+	if !isBlank(blackJpegOf(600, 849)) {
+		t.Error("black JPEG not seen as blank")
+	}
+	if isBlank(jpegOf(600, 849)) {
+		t.Error("a lit picture seen as blank")
+	}
+	// Dark with one highlight: still a picture.
+	dark := image.NewRGBA(image.Rect(0, 0, 600, 849))
+	for i := 0; i < len(dark.Pix); i += 4 {
+		dark.Pix[i+3] = 255
+	}
+	for y := 400; y < 440; y++ {
+		for x := 280; x < 320; x++ {
+			o := dark.PixOffset(x, y)
+			dark.Pix[o], dark.Pix[o+1], dark.Pix[o+2] = 200, 40, 60
+		}
+	}
+	var buf bytes.Buffer
+	jpeg.Encode(&buf, dark, nil)
+	if isBlank(buf.Bytes()) {
+		t.Error("a dark picture with a highlight seen as blank")
+	}
+	if isBlank([]byte("not an image")) {
+		t.Error("undecodable data must not count as blank")
 	}
 }
