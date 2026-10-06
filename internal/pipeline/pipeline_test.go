@@ -540,3 +540,49 @@ func TestBlankTellsABlackFrameFromADarkPicture(t *testing.T) {
 		t.Error("undecodable data must not count as blank")
 	}
 }
+
+// restore: the quick pass that needs no model. Black keys get their
+// original back; lit keys are left alone unless asked for every key.
+func TestRestorePutsTheOriginalBackOverABlackKeyOnly(t *testing.T) {
+	store, up, pg, p := setup(424)
+	done := map[string]string{"source-length": "1", MetaUpscaled: "x", MetaNormalized: "1", MetaDisplayWidth: "600"}
+	store.objs["weeb/black"] = obj{blackJpegOf(600, 849), "image/jpeg", done}
+	store.objs["weeb/black-orig"] = obj{jpegOf(424, 600), "image/jpeg", map[string]string{"source-length": "1"}}
+	store.objs["weeb/good"] = obj{jpegOf(600, 849), "image/jpeg", done}
+	store.objs["weeb/good-orig"] = obj{jpegOf(424, 600), "image/jpeg", nil}
+	store.objs["weeb/lost"] = obj{blackJpegOf(600, 849), "image/jpeg", done}
+	store.objs["weeb/lost-orig"] = obj{blackJpegOf(424, 600), "image/jpeg", nil}
+
+	res, err := p.Restore(context.Background(), "weeb/black", false)
+	if err != nil || res.Outcome != Restored || res.Width != 600 || res.NewWidth != 424 {
+		t.Fatalf("black: %+v %v", res, err)
+	}
+	got := store.objs["weeb/black"]
+	if isBlank(got.data) || widthOf(got.data) != 424 || got.meta[MetaUpscaled] != "" || got.meta[MetaNormalized] != "" || got.meta["source-length"] != "1" {
+		t.Errorf("after restore: %dpx meta %v", widthOf(got.data), got.meta)
+	}
+	if len(pg.urls) != 1 || pg.urls[0] != "https://cdn.weeb.vip/weeb/black" {
+		t.Errorf("purged %v", pg.urls)
+	}
+	// And the walk then upscales it like any untouched source.
+	hres, err := p.Handle(context.Background(), "weeb/black")
+	if err != nil || hres.Outcome != Upscaled || up.calls != 1 {
+		t.Errorf("walk after restore: %+v %v calls=%d", hres, err, up.calls)
+	}
+
+	res, _ = p.Restore(context.Background(), "weeb/good", false)
+	if res.Outcome != KeyIsFine || widthOf(store.objs["weeb/good"].data) != 600 {
+		t.Errorf("good key touched: %+v", res)
+	}
+	res, _ = p.Restore(context.Background(), "weeb/good", true)
+	if res.Outcome != Restored || widthOf(store.objs["weeb/good"].data) != 424 {
+		t.Errorf("--all should restore a lit key too: %+v", res)
+	}
+	res, _ = p.Restore(context.Background(), "weeb/lost", false)
+	if res.Outcome != NoOriginal || !isBlank(store.objs["weeb/lost"].data) {
+		t.Errorf("a black original is no use: %+v", res)
+	}
+	if res, _ := p.Restore(context.Background(), "weeb/black-orig", false); res.Outcome != IsOriginal {
+		t.Errorf("an -orig key itself: %+v", res)
+	}
+}

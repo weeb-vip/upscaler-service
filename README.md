@@ -68,6 +68,12 @@ walks what is already in the bucket. Both apply the same rules:
 5. Purge `CDN_BASE_URL/<key>` from Cloudflare when a zone id and API token
    are set, so the resizer rebuilds its variants from the new bytes.
 
+`restore --prefix weeb/` is the quick undo for black results: it walks the
+`-orig` copies and puts each one back over an all-black key, no model
+involved, so a bucket is cleaned in minutes; the restored keys carry no
+provenance and the next `backfill` upscales them properly. `--all` puts the
+original back over every key instead, `--dry-run` lists, `--limit` stops early.
+
 | Variable | Default | |
 |---|---|---|
 | `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY_ID`, `MINIO_SECRET_ACCESS_KEY`, `MINIO_USESSL`, `MINIO_BUCKET` | image-sync's | The bucket |

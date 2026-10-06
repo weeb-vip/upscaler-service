@@ -19,16 +19,23 @@ func newUpscaler(cfg config.Config) *upscaler.Upscaler {
 
 // newPipeline wires the bucket, the runner and the purge from the config.
 func newPipeline(cfg config.Config) (*pipeline.Pipeline, error) {
-	up := newUpscaler(cfg)
-	if err := up.Check(); err != nil {
-		return nil, err
-	}
 	store, err := bucket.New(bucket.Config{
 		Endpoint: cfg.Bucket.Endpoint, AccessKeyID: cfg.Bucket.AccessKeyID, SecretAccessKey: cfg.Bucket.SecretAccessKey,
 		UseSSL: cfg.Bucket.UseSSL, Bucket: cfg.Bucket.Bucket,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bucket: %w", err)
+	}
+	return newPipelineWith(cfg, store)
+}
+
+// newPipelineWith wires the runner and the purge around a given store.
+// The runner is only checked when the command will run it; restore does
+// not, and should work in an image without the model too.
+func newPipelineWith(cfg config.Config, store bucket.Store) (*pipeline.Pipeline, error) {
+	up := newUpscaler(cfg)
+	if err := up.Check(); err != nil {
+		return nil, err
 	}
 	var purger purge.Purger
 	if cf := purge.NewCloudflare(cfg.CloudflareZoneID, cfg.CloudflareToken); cf != nil {
