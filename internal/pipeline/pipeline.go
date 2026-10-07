@@ -213,7 +213,7 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 		if err := p.store.Put(ctx, key, orig, contentTypeOf(orig), origMeta); err != nil {
 			return res, fmt.Errorf("restore %s: %w", key, err)
 		}
-		log.Printf("%s: all-black result restored from %s%s", key, key, p.opts.OrigSuffix)
+		log.Printf("black image found at %s: reverted to %s%s, upscaling it again", key, key, p.opts.OrigSuffix)
 		data, meta = orig, origMeta
 		if cfg, _, err = image.DecodeConfig(bytes.NewReader(data)); err != nil {
 			res.Outcome = Undecodable
@@ -275,7 +275,7 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 	if isBlank(out) && !isBlank(data) {
 		// Never let a black frame replace a picture: an error here keeps
 		// the key as it is and sends the event round the retry stream.
-		return res, fmt.Errorf("upscale %s produced an all-black image", key)
+		return res, fmt.Errorf("black image produced for %s: not stored, the key is unchanged", key)
 	}
 
 	newMeta := make(map[string]string, len(meta)+4)

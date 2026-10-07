@@ -73,10 +73,10 @@ var restoreCmd = &cobra.Command{
 			}
 			counts[res.Outcome]++
 			if res.Outcome == pipeline.Restored {
-				log.Printf("%s: %dpx black result replaced by the %dpx original (%d bytes)", key, res.Width, res.NewWidth, res.Bytes)
+				log.Printf("black image found at %s (%dpx): reverted to %s%s (%dpx, %d bytes)", key, res.Width, key, cfg.Pipeline.OrigSuffix, res.NewWidth, res.Bytes)
 			}
 		}
-		log.Printf("restore done: originals=%d failed=%d outcomes=%v", seen, failed, counts)
+		log.Printf("restore done: originals=%d black-images-reverted=%d failed=%d outcomes=%v", seen, counts[pipeline.Restored], failed, counts)
 		return nil
 	},
 }
