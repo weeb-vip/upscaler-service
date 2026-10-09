@@ -85,7 +85,7 @@ var backfillCmd = &cobra.Command{
 					} else {
 						counts[res.Outcome]++
 						switch {
-						case res.Outcome == pipeline.Upscaled || res.Outcome == pipeline.Repaired || res.Outcome == pipeline.Downsized || res.Outcome == pipeline.Recompressed:
+						case res.Outcome == pipeline.Upscaled || res.Outcome == pipeline.Repaired || res.Outcome == pipeline.Downsized || res.Outcome == pipeline.Recompressed || res.Outcome == pipeline.Reencoded:
 							log.Printf("%s: %s, %dpx -> %dpx, %d bytes, %s", key, res.Outcome, res.Width, res.NewWidth, res.Bytes, res.Took.Round(1e6))
 						case backfillVerbose:
 							log.Printf("%s: %s (%dpx)", key, res.Outcome, res.Width)

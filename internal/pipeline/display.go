@@ -52,10 +52,19 @@ func (p *Pipeline) displayStale(meta map[string]string) bool {
 	return meta[MetaDisplayFormat] != p.opts.DisplayFormat
 }
 
-// bestSource is what a display copy should be made from: the uncapped
-// upscale at <key>-full when there is one, else the untouched original at
-// <key>-orig, else the object itself.
+// bestSource is what a display copy should be made from: the widest
+// picture available among the uncapped upscale at <key>-full, the object
+// itself, and the untouched original at <key>-orig.
+//
+// Widest, not a fixed order. An upscale that fit under the cap was stored
+// at the key with no -full beside it, and preferring -orig there handed the
+// conversion the 225px original in place of the 450px result: 1,186 root
+// keys came out of the first walk at a third of their size.
 func (p *Pipeline) bestSource(ctx context.Context, key string, data []byte) ([]byte, error) {
+	best, bestWidth := data, 0
+	if cfg, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil {
+		bestWidth = cfg.Width
+	}
 	for _, suffix := range []string{p.opts.FullSuffix, p.opts.OrigSuffix} {
 		if suffix == "" {
 			continue
@@ -71,11 +80,15 @@ func (p *Pipeline) bestSource(ctx context.Context, key string, data []byte) ([]b
 		if err != nil {
 			return nil, fmt.Errorf("get %s%s: %w", key, suffix, err)
 		}
-		if _, _, err := image.DecodeConfig(bytes.NewReader(src)); err == nil && !isBlank(src) {
-			return src, nil
+		cfg, _, err := image.DecodeConfig(bytes.NewReader(src))
+		if err != nil || isBlank(src) {
+			continue
+		}
+		if cfg.Width > bestWidth {
+			best, bestWidth = src, cfg.Width
 		}
 	}
-	return data, nil
+	return best, nil
 }
 
 // renderDisplay writes the key's display copy from `source`, capped at

@@ -244,6 +244,31 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 		res.Width = cfg.Width
 		repaired = true
 	}
+	// An "upscaled" key no wider than the source it was upscaled from has
+	// lost its upscale (the first WebP walk wrote 1,186 of those from the
+	// original): put the original back, provenance stripped, so it is a
+	// small untouched source again and the walk with the model takes it.
+	if meta[MetaUpscaled] != "" {
+		if from, _ := strconv.Atoi(meta[MetaFromWidth]); from > 0 && cfg.Width <= from {
+			orig, origMeta, ok, err := p.usableOriginal(ctx, key)
+			if err != nil {
+				return res, err
+			}
+			if ok {
+				if err := p.store.Put(ctx, key, orig, contentTypeOf(orig), origMeta); err != nil {
+					return res, fmt.Errorf("restore %s: %w", key, err)
+				}
+				log.Printf("lost upscale at %s (%dpx, from %dpx): reverted to %s%s", key, cfg.Width, from, key, p.opts.OrigSuffix)
+				data, meta = orig, origMeta
+				if cfg, _, err = image.DecodeConfig(bytes.NewReader(data)); err != nil {
+					res.Outcome = Undecodable
+					return res, nil
+				}
+				res.Width = cfg.Width
+				repaired = true
+			}
+		}
+	}
 	// A treated object in the old display format: re-encode it from its
 	// best source (the uncapped upscale, else the original), variants and
 	// all. This is the walk that turns a bucket of JPEG into WebP.

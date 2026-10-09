@@ -731,3 +731,60 @@ func TestWithoutTheModelOversizedObjectsBecomeWebP(t *testing.T) {
 		t.Errorf("small: %+v", res)
 	}
 }
+
+// The regression of the first WebP walk: an upscale that fit under the cap
+// had no -full beside it, and -orig (smaller) was taken as the source.
+func TestTheConversionTakesTheWidestSourceNotTheOriginalOverTheKey(t *testing.T) {
+	done := map[string]string{MetaUpscaled: "m x2", MetaFromWidth: "225", MetaNormalized: "1", MetaDisplayWidth: "450"}
+	store := &memStore{objs: map[string]obj{
+		"weeb/one":      {jpegOf(450, 640), "image/jpeg", done},
+		"weeb/one-orig": {jpegOf(225, 320), "image/jpeg", nil},
+	}}
+	up := &fakeUp{}
+	enc, _, p := webpPipeline(store, up)
+
+	res, err := p.Handle(context.Background(), "weeb/one")
+	if err != nil || res.Outcome != Reencoded || res.NewWidth != 450 || up.calls != 0 {
+		t.Fatalf("%+v %v calls=%d", res, err, up.calls)
+	}
+	if widthOf(store.objs["weeb/one"].data) != 450 || store.objs["weeb/one"].ct != "image/webp" {
+		t.Errorf("key: %dpx %s", widthOf(store.objs["weeb/one"].data), store.objs["weeb/one"].ct)
+	}
+	if _, ok := store.objs["weeb/one-w320"]; !ok {
+		t.Errorf("the 320 variant is missing: encoder calls %v", enc.calls)
+	}
+}
+
+// What that walk left behind: an "upscaled" key at its source's width. The
+// original goes back, provenance stripped, and the model does it again.
+func TestAKeyThatLostItsUpscaleIsRestoredAndUpscaledAgain(t *testing.T) {
+	lost := map[string]string{MetaUpscaled: "m x2", MetaFromWidth: "225", MetaNormalized: "1", MetaDisplayWidth: "225", MetaDisplayFormat: "webp"}
+	store := &memStore{objs: map[string]obj{
+		"weeb/one":      {jpegOf(225, 320), "image/webp", lost},
+		"weeb/one-orig": {jpegOf(225, 320), "image/jpeg", nil},
+	}}
+	up := &fakeUp{}
+	_, _, p := webpPipeline(store, up)
+
+	res, err := p.Handle(context.Background(), "weeb/one")
+	if err != nil || res.Outcome != Repaired || up.calls != 1 || res.NewWidth != 600 {
+		t.Fatalf("%+v %v calls=%d", res, err, up.calls)
+	}
+	if store.objs["weeb/one"].ct != "image/webp" || store.objs["weeb/one"].meta[MetaFromWidth] != "225" {
+		t.Errorf("after repair: %s %v", store.objs["weeb/one"].ct, store.objs["weeb/one"].meta)
+	}
+
+	// Without the model the original is put back and left for the model pass.
+	store2 := &memStore{objs: map[string]obj{
+		"weeb/two":      {jpegOf(225, 320), "image/webp", lost},
+		"weeb/two-orig": {jpegOf(225, 320), "image/jpeg", nil},
+	}}
+	p2 := New(store2, up, nil, Options{KeepOriginal: true, SkipUpscale: true, Encoder: &fakeEnc{}, DisplayFormat: "webp"})
+	res, err = p2.Handle(context.Background(), "weeb/two")
+	if err != nil || res.Outcome != AlreadyWide || up.calls != 1 {
+		t.Fatalf("no model: %+v %v calls=%d", res, err, up.calls)
+	}
+	if store2.objs["weeb/two"].meta[MetaUpscaled] != "" || store2.objs["weeb/two"].ct != "image/jpeg" {
+		t.Errorf("no model: the key should be the plain original again: %v", store2.objs["weeb/two"].meta)
+	}
+}
