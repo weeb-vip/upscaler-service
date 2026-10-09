@@ -21,6 +21,7 @@ var (
 	backfillDryRun  bool
 	backfillWorkers int
 	backfillNoModel bool
+	backfillVerbose bool
 )
 
 // backfillCmd walks the bucket and runs the pipeline over everything under a
@@ -64,6 +65,7 @@ var backfillCmd = &cobra.Command{
 			wg     sync.WaitGroup
 			counts = map[pipeline.Outcome]int{}
 			failed int
+			done   int
 			keys   = make(chan string)
 		)
 		for i := 0; i < backfillWorkers; i++ {
@@ -71,16 +73,28 @@ var backfillCmd = &cobra.Command{
 			go func() {
 				defer wg.Done()
 				for key := range keys {
+					if backfillVerbose {
+						log.Printf("%s: fetching", key)
+					}
 					res, err := p.Handle(ctx, key)
 					mu.Lock()
+					done++
 					if err != nil {
 						failed++
 						log.Printf("%s: %v", key, err)
 					} else {
 						counts[res.Outcome]++
-						if res.Outcome == pipeline.Upscaled || res.Outcome == pipeline.Repaired || res.Outcome == pipeline.Downsized || res.Outcome == pipeline.Recompressed {
-							log.Printf("%s: %dpx -> %dpx, %d bytes, %s", key, res.Width, res.NewWidth, res.Bytes, res.Took.Round(1e6))
+						switch {
+						case res.Outcome == pipeline.Upscaled || res.Outcome == pipeline.Repaired || res.Outcome == pipeline.Downsized || res.Outcome == pipeline.Recompressed:
+							log.Printf("%s: %s, %dpx -> %dpx, %d bytes, %s", key, res.Outcome, res.Width, res.NewWidth, res.Bytes, res.Took.Round(1e6))
+						case backfillVerbose:
+							log.Printf("%s: %s (%dpx)", key, res.Outcome, res.Width)
 						}
+					}
+					// A heartbeat whatever the keys needed: a stretch of keys that
+					// need nothing is otherwise silence.
+					if done%500 == 0 {
+						log.Printf("progress: %d keys handled, failed=%d, outcomes=%v", done, failed, counts)
 					}
 					mu.Unlock()
 				}
@@ -125,6 +139,7 @@ func init() {
 	backfillCmd.Flags().IntVar(&backfillLimit, "limit", 0, "stop after this many objects (0 = all)")
 	backfillCmd.Flags().BoolVar(&backfillDryRun, "dry-run", false, "list what would be considered, touch nothing")
 	backfillCmd.Flags().BoolVar(&backfillNoModel, "no-upscale", false, "no model: only bring oversized objects down to display size and weight; small sources are left for a later walk")
+	backfillCmd.Flags().BoolVar(&backfillVerbose, "verbose", false, "log every key with its outcome, not only the ones rewritten")
 	backfillCmd.Flags().IntVar(&backfillWorkers, "workers", 1, "keys handled at once; more than 1 for a machine whose runner leaves cores idle")
 	rootCmd.AddCommand(backfillCmd)
 }
