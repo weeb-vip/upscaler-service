@@ -5,3 +5,7 @@
 /.venv/
 /runner/models/*.pth
 __pycache__/
+
+# local bucket credentials for a laptop backfill
+.env*
+*.log
