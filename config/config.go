@@ -94,6 +94,12 @@ type PipelineConfig struct {
 	// SkipUpscale: no model, only the display treatment. Set by backfill
 	// --no-upscale, not by the environment.
 	SkipUpscale bool
+	// DisplayFormat of the key's copy: webp (default) or jpg.
+	DisplayFormat string
+	// DisplayBinary is runner/display.py, or a wrapper running it in a venv.
+	DisplayBinary string
+	// Variants per kind: stored widths beside the key, e.g. "320,640".
+	Variants map[string][]int
 }
 
 type NatsConfig struct {
@@ -137,6 +143,9 @@ func Load() Config {
 			CDNBase:        env("CDN_BASE_URL", "https://cdn.weeb.vip"),
 			Scales:         scalesByKind(),
 			DisplayWidths:  byKind("UPSCALER_MAX_WIDTH_"),
+			DisplayFormat:  env("UPSCALER_DISPLAY_FORMAT", "webp"),
+			DisplayBinary:  env("UPSCALER_DISPLAY_BINARY", "runner/display.py"),
+			Variants:       listsByKind("UPSCALER_VARIANTS_"),
 			KeepFull:       env("UPSCALER_KEEP_FULL", "true") == "true",
 			DisplayQuality: intEnv("UPSCALER_DISPLAY_QUALITY", 85),
 			MaxBytes:       intEnv("UPSCALER_MAX_KB", 250) * 1024,
@@ -164,6 +173,26 @@ func byKind(prefix string) map[string]int {
 		if n := intEnv(prefix+strings.ToUpper(kind), 0); n > 0 {
 			out[kind] = n
 		}
+	}
+	return out
+}
+
+// listsByKind reads UPSCALER_VARIANTS_<KIND> as a comma-separated list of
+// widths; a kind left unset keeps the pipeline's default.
+func listsByKind(prefix string) map[string][]int {
+	out := map[string][]int{}
+	for _, kind := range []string{"anime", "poster", "banner", "character", "staff", "work"} {
+		v := os.Getenv(prefix + strings.ToUpper(kind))
+		if v == "" {
+			continue
+		}
+		var widths []int
+		for _, part := range strings.Split(v, ",") {
+			if n, err := strconv.Atoi(strings.TrimSpace(part)); err == nil && n > 0 {
+				widths = append(widths, n)
+			}
+		}
+		out[kind] = widths
 	}
 	return out
 }

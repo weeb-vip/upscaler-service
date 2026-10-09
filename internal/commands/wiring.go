@@ -5,6 +5,7 @@ import (
 
 	"github.com/weeb-vip/upscaler-service/config"
 	"github.com/weeb-vip/upscaler-service/internal/bucket"
+	"github.com/weeb-vip/upscaler-service/internal/encoder"
 	"github.com/weeb-vip/upscaler-service/internal/pipeline"
 	"github.com/weeb-vip/upscaler-service/internal/purge"
 	"github.com/weeb-vip/upscaler-service/internal/upscaler"
@@ -40,6 +41,21 @@ func newPipelineWith(cfg config.Config, store bucket.Store) (*pipeline.Pipeline,
 			return nil, err
 		}
 	}
+	var enc pipeline.Encoder
+	if cfg.Pipeline.DisplayFormat != "" && cfg.Pipeline.DisplayFormat != "jpg" {
+		e := encoder.New(encoder.Options{Binary: cfg.Pipeline.DisplayBinary})
+		if err := e.Check(); err != nil {
+			return nil, err
+		}
+		enc = e
+	}
+	variants := map[pipeline.Kind][]int{}
+	for kind, ws := range pipeline.DefaultVariants {
+		variants[kind] = ws
+	}
+	for kind, ws := range cfg.Pipeline.Variants {
+		variants[pipeline.Kind(kind)] = ws
+	}
 	var purger purge.Purger
 	if cf := purge.NewCloudflare(cfg.CloudflareZoneID, cfg.CloudflareToken); cf != nil {
 		purger = cf
@@ -60,6 +76,7 @@ func newPipelineWith(cfg config.Config, store bucket.Store) (*pipeline.Pipeline,
 		MinWidth: cfg.Pipeline.MinWidth, KeepOriginal: cfg.Pipeline.KeepOriginal, OrigSuffix: cfg.Pipeline.OrigSuffix,
 		Format: cfg.Pipeline.Format, CDNBase: cfg.Pipeline.CDNBase, Model: cfg.Model, Scales: scales,
 		DisplayWidths: widths, KeepFull: cfg.Pipeline.KeepFull, DisplayQuality: cfg.Pipeline.DisplayQuality,
-		MaxBytes: cfg.Pipeline.MaxBytes,
+		MaxBytes: cfg.Pipeline.MaxBytes, SkipUpscale: cfg.Pipeline.SkipUpscale,
+		Encoder: enc, DisplayFormat: cfg.Pipeline.DisplayFormat, Variants: variants,
 	}), nil
 }

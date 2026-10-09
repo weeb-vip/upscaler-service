@@ -3,6 +3,7 @@ package pipeline
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"image"
 	"image/jpeg"
 	"image/png"
@@ -584,5 +585,149 @@ func TestRestorePutsTheOriginalBackOverABlackKeyOnly(t *testing.T) {
 	}
 	if res, _ := p.Restore(context.Background(), "weeb/black-orig", false); res.Outcome != IsOriginal {
 		t.Errorf("an -orig key itself: %+v", res)
+	}
+}
+
+// A fake display encoder: a PNG of the asked width (never wider than the
+// source), remembering what it was asked for.
+type fakeEnc struct{ calls []string }
+
+func (f *fakeEnc) Encode(_ context.Context, src []byte, width int, format string, quality int) ([]byte, error) {
+	cfg, _, _ := image.DecodeConfig(bytes.NewReader(src))
+	w := cfg.Width
+	if width > 0 && width < w {
+		w = width
+	}
+	h := cfg.Height * w / cfg.Width
+	f.calls = append(f.calls, fmt.Sprintf("%dx%s", w, format))
+	var buf bytes.Buffer
+	png.Encode(&buf, lit(w, h))
+	return buf.Bytes(), nil
+}
+
+func webpPipeline(store *memStore, up Upscaler) (*fakeEnc, *fakePurge, *Pipeline) {
+	enc := &fakeEnc{}
+	pg := &fakePurge{}
+	p := New(store, up, pg, Options{KeepOriginal: true, KeepFull: true, CDNBase: "https://cdn.weeb.vip", Model: "m", Encoder: enc, DisplayFormat: "webp"})
+	return enc, pg, p
+}
+
+// The display copy is WebP at the cap, the kind's variants sit beside it,
+// and the key says so.
+func TestTheDisplayCopyIsWebPWithVariantsBesideIt(t *testing.T) {
+	store := &memStore{objs: map[string]obj{
+		"weeb/posters/one": {jpegOf(680, 1000), "image/jpeg", map[string]string{"source-length": "1"}},
+	}}
+	up := &fakeUp{}
+	enc, pg, p := webpPipeline(store, up)
+
+	res, err := p.Handle(context.Background(), "weeb/posters/one")
+	if err != nil || res.Outcome != Upscaled || res.NewWidth != 1000 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	key := store.objs["weeb/posters/one"]
+	if key.ct != "image/webp" || key.meta[MetaDisplayFormat] != "webp" || key.meta[MetaDisplayVariants] != "320,640" || key.meta[MetaDisplayWidth] != "1000" {
+		t.Errorf("key: ct=%s meta=%v", key.ct, key.meta)
+	}
+	for _, w := range []int{320, 640} {
+		v, ok := store.objs["weeb/posters/one"+VariantSuffix(w)]
+		if !ok || widthOf(v.data) != w || v.ct != "image/webp" {
+			t.Errorf("variant %d: present=%v width=%d ct=%s", w, ok, widthOf(v.data), v.ct)
+		}
+	}
+	if _, full := store.objs["weeb/posters/one-full"]; !full {
+		t.Error("the uncapped upscale should still be kept at -full")
+	}
+	// Three encodes: the display copy and two variants, all from the 2720px upscale.
+	if len(enc.calls) != 3 {
+		t.Errorf("encoder calls %v", enc.calls)
+	}
+	// Every written URL purged: the key and both variants.
+	if len(pg.urls) != 3 {
+		t.Errorf("purged %v", pg.urls)
+	}
+}
+
+// The conversion walk: a key already upscaled and stored as JPEG, with the
+// uncapped result beside it, is re-made as WebP from that result and left
+// alone afterwards.
+func TestAJPEGDisplayCopyIsReencodedAsWebPFromTheFullResult(t *testing.T) {
+	done := map[string]string{"source-length": "1", MetaUpscaled: "m x4", MetaNormalized: "1", MetaDisplayWidth: "1000"}
+	store := &memStore{objs: map[string]obj{
+		"weeb/posters/one":      {jpegOf(1000, 1470), "image/jpeg", done},
+		"weeb/posters/one-full": {jpegOf(2720, 4000), "image/jpeg", done},
+		"weeb/posters/one-orig": {jpegOf(680, 1000), "image/jpeg", nil},
+	}}
+	up := &fakeUp{}
+	enc, _, p := webpPipeline(store, up)
+
+	res, err := p.Handle(context.Background(), "weeb/posters/one")
+	if err != nil || res.Outcome != Reencoded || res.NewWidth != 1000 || up.calls != 0 {
+		t.Fatalf("%+v %v calls=%d", res, err, up.calls)
+	}
+	key := store.objs["weeb/posters/one"]
+	if key.ct != "image/webp" || key.meta[MetaDisplayFormat] != "webp" || key.meta[MetaUpscaled] != "m x4" {
+		t.Errorf("key: ct=%s meta=%v", key.ct, key.meta)
+	}
+	if _, ok := store.objs["weeb/posters/one-w640"]; !ok {
+		t.Error("variants missing after the conversion")
+	}
+	if len(enc.calls) == 0 || enc.calls[0] != "1000xwebp" {
+		t.Errorf("display copy should come from the 2720px full result capped to 1000: %v", enc.calls)
+	}
+	if widthOf(store.objs["weeb/posters/one-full"].data) != 2720 {
+		t.Error("the full result was touched")
+	}
+
+	res, _ = p.Handle(context.Background(), "weeb/posters/one")
+	if res.Outcome != AlreadyUpscaled {
+		t.Errorf("second pass: %+v", res)
+	}
+}
+
+// Without a full result the original is the source; with neither, the key itself.
+func TestTheConversionFallsBackToTheOriginalThenTheKey(t *testing.T) {
+	norm := map[string]string{MetaNormalized: "1", MetaDisplayWidth: "1000"}
+	store := &memStore{objs: map[string]obj{
+		"weeb/posters/a":      {jpegOf(1000, 1470), "image/jpeg", norm},
+		"weeb/posters/a-orig": {jpegOf(3000, 4400), "image/jpeg", nil},
+		"weeb/posters/b":      {jpegOf(1000, 1470), "image/jpeg", norm},
+	}}
+	enc, _, p := webpPipeline(store, &fakeUp{})
+	if res, err := p.Handle(context.Background(), "weeb/posters/a"); err != nil || res.Outcome != Reencoded {
+		t.Fatalf("a: %+v %v", res, err)
+	}
+	if res, err := p.Handle(context.Background(), "weeb/posters/b"); err != nil || res.Outcome != Reencoded {
+		t.Fatalf("b: %+v %v", res, err)
+	}
+	if store.objs["weeb/posters/a"].ct != "image/webp" || store.objs["weeb/posters/b"].ct != "image/webp" {
+		t.Errorf("both keys should be webp now: %v", enc.calls)
+	}
+}
+
+// The fast pass with the encoder: an oversized untouched object comes down
+// as WebP with variants; a small source is still left for the model.
+func TestWithoutTheModelOversizedObjectsBecomeWebP(t *testing.T) {
+	store := &memStore{objs: map[string]obj{
+		"weeb/wide":  {jpegOf(3000, 4400), "image/jpeg", nil},
+		"weeb/small": {jpegOf(225, 337), "image/jpeg", nil},
+	}}
+	up := &fakeUp{}
+	enc := &fakeEnc{}
+	p := New(store, up, nil, Options{KeepOriginal: true, SkipUpscale: true, Encoder: enc, DisplayFormat: "webp"})
+
+	res, err := p.Handle(context.Background(), "weeb/wide")
+	if err != nil || res.Outcome != Downsized || res.NewWidth != 600 {
+		t.Fatalf("wide: %+v %v", res, err)
+	}
+	if store.objs["weeb/wide"].ct != "image/webp" || widthOf(store.objs["weeb/wide-w320"].data) != 320 {
+		t.Error("wide: not webp with its 320 variant")
+	}
+	if _, kept := store.objs["weeb/wide-orig"]; !kept {
+		t.Error("original not kept")
+	}
+	res, _ = p.Handle(context.Background(), "weeb/small")
+	if res.Outcome != AlreadyWide || up.calls != 0 || store.objs["weeb/small"].ct != "image/jpeg" {
+		t.Errorf("small: %+v", res)
 	}
 }

@@ -65,8 +65,23 @@ walks what is already in the bucket. Both apply the same rules:
    `upscaled`, `upscaled-from-width`, `upscaled-at` and `display-width`.
    An object upscaled before the cap existed is brought down to it on the
    next pass, with the full result kept first.
-5. Purge `CDN_BASE_URL/<key>` from Cloudflare when a zone id and API token
-   are set, so the resizer rebuilds its variants from the new bytes.
+5. Purge `CDN_BASE_URL/<key>` (and the variants) from Cloudflare when a zone
+   id and API token are set; the edge holds objects for 30 days otherwise.
+
+The display copy at the key is WebP (`UPSCALER_DISPLAY_FORMAT`, q
+`UPSCALER_DISPLAY_QUALITY`), written by `runner/display.py` through Pillow
+(`UPSCALER_DISPLAY_BINARY`): a third smaller than the same picture as JPEG.
+Beside it sit width variants for the pages' smaller slots, `<key>-w320` and so
+on (`UPSCALER_VARIANTS_<KIND>`, defaults 320 for roots, 320 and 640 for
+posters and works, 160 for characters and staff, 960 for banners), so a card
+can ask for the size it draws. The key's metadata says what it holds
+(`display-format`, `display-variants`); an object whose format differs from
+the configured one is re-encoded from its best source (`-full`, else `-orig`)
+on the next walk, which is how the bucket converts.
+
+`backfill --no-upscale` is the fast pass: no model, every treated or oversized
+object brought to display size, format and weight; `--workers N` runs keys in
+parallel; `--verbose` logs every key.
 
 `restore --prefix weeb/` is the quick undo for black results: it walks the
 `-orig` copies and puts each one back over an all-black key, no model

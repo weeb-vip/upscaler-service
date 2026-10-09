@@ -97,6 +97,16 @@ type Options struct {
 	// more, so a 1.3 MB poster is 1.3 MB on every card that shows it. 0
 	// turns it off.
 	MaxBytes int
+	// Encoder writes the display copies (WebP by default) and the width
+	// variants beside the key; nil keeps the Go JPEG path, for tests.
+	Encoder Encoder
+	// DisplayFormat is what the key holds: "webp" (default) or "jpg". An
+	// object whose recorded display-format differs is re-encoded from its
+	// best source on the next walk.
+	DisplayFormat string
+	// Variants per kind: the stored widths beside the key (<key>-w320).
+	// Nil means DefaultVariants.
+	Variants map[Kind][]int
 	// SkipUpscale: no model. A source that would be upscaled is only given
 	// the display treatment (re-encoded if heavy) and left for a later
 	// walk, which still finds it unmarked and small. The fast first pass
@@ -144,6 +154,9 @@ func New(store bucket.Store, up Upscaler, purger purge.Purger, opts Options) *Pi
 	if opts.MaxBytes == 0 {
 		opts.MaxBytes = 250 * 1024
 	}
+	if opts.Variants == nil {
+		opts.Variants = DefaultVariants
+	}
 	return &Pipeline{store: store, up: up, purger: purger, opts: opts}
 }
 
@@ -163,6 +176,9 @@ const (
 	Repaired Outcome = "repaired"
 	// Blank: an all-black object with no usable original to restore from.
 	Blank Outcome = "blank"
+	// Reencoded: an already-treated object whose display copy was in another
+	// format; re-made from its best source, variants beside it.
+	Reencoded Outcome = "re-encoded"
 )
 
 // MetaNormalized marks an object the pipeline has sized and compressed for
@@ -227,6 +243,24 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 		}
 		res.Width = cfg.Width
 		repaired = true
+	}
+	// A treated object in the old display format: re-encode it from its
+	// best source (the uncapped upscale, else the original), variants and
+	// all. This is the walk that turns a bucket of JPEG into WebP.
+	if (meta[MetaUpscaled] != "" || meta[MetaNormalized] != "") && p.displayStale(meta) {
+		source, err := p.bestSource(ctx, key, data)
+		if err != nil {
+			return res, err
+		}
+		width, size, err := p.renderDisplay(ctx, key, source, cap, meta)
+		if err != nil {
+			return res, err
+		}
+		res.Outcome = Reencoded
+		res.NewWidth = width
+		res.Bytes = size
+		res.Took = time.Since(start)
+		return res, nil
 	}
 	if meta[MetaUpscaled] != "" {
 		// Done before, but possibly before objects were capped: a 2720px
@@ -301,36 +335,17 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 			return res, fmt.Errorf("put %s: %w", key+p.opts.FullSuffix, err)
 		}
 	}
-	display, displayWidth, err := fitWidth(out, cap, p.opts.DisplayQuality)
+	displayWidth, displaySize, err := p.renderDisplay(ctx, key, out, cap, newMeta)
 	if err != nil {
-		return res, fmt.Errorf("fit %s: %w", key, err)
-	}
-	ct := contentTypeFor(p.opts.Format)
-	if displayWidth != outCfg.Width {
-		ct = "image/jpeg"
-	}
-	newMeta[MetaDisplayWidth] = strconv.Itoa(displayWidth)
-	newMeta[MetaNormalized] = "1"
-	if err := p.store.Put(ctx, key, display, ct, newMeta); err != nil {
-		return res, fmt.Errorf("put %s: %w", key, err)
-	}
-	out = display
-	outCfg.Width = displayWidth
-
-	if p.purger != nil && p.opts.CDNBase != "" {
-		url := strings.TrimSuffix(p.opts.CDNBase, "/") + "/" + key
-		if err := p.purger.Purge(ctx, []string{url}); err != nil {
-			// The object is replaced; a stale edge copy ages out on its own.
-			log.Printf("purge %s: %v", url, err)
-		}
+		return res, err
 	}
 
 	res.Outcome = Upscaled
 	if repaired {
 		res.Outcome = Repaired
 	}
-	res.NewWidth = outCfg.Width
-	res.Bytes = len(out)
+	res.NewWidth = displayWidth
+	res.Bytes = displaySize
 	res.Took = time.Since(start)
 	return res, nil
 }
@@ -355,7 +370,7 @@ func (p *Pipeline) usableOriginal(ctx context.Context, key string) ([]byte, map[
 		return nil, nil, false, nil
 	}
 	clean := copyMeta(meta)
-	for _, k := range []string{MetaUpscaled, MetaFromWidth, MetaUpscaledAt, MetaDisplayWidth, MetaNormalized} {
+	for _, k := range []string{MetaUpscaled, MetaFromWidth, MetaUpscaledAt, MetaDisplayWidth, MetaNormalized, MetaDisplayFormat, MetaDisplayVariants} {
 		delete(clean, k)
 	}
 	return data, clean, true, nil
@@ -375,16 +390,13 @@ func (p *Pipeline) downsize(ctx context.Context, key string, data []byte, meta m
 			return res, err
 		}
 	}
-	display, displayWidth, err := fitWidth(data, cap, p.opts.DisplayQuality)
+	displayWidth, displaySize, err := p.renderDisplay(ctx, key, data, cap, meta)
 	if err != nil {
-		return res, fmt.Errorf("fit %s: %w", key, err)
-	}
-	if err := p.putDisplay(ctx, key, display, meta, displayWidth); err != nil {
 		return res, err
 	}
 	res.Outcome = Downsized
 	res.NewWidth = displayWidth
-	res.Bytes = len(display)
+	res.Bytes = displaySize
 	res.Took = time.Since(start)
 	return res, nil
 }
@@ -395,6 +407,22 @@ func (p *Pipeline) downsize(ctx context.Context, key string, data []byte, meta m
 // way so it is not revisited.
 func (p *Pipeline) recompress(ctx context.Context, key string, data []byte, meta map[string]string, res Result) (Result, error) {
 	start := time.Now()
+	if p.opts.Encoder != nil && p.opts.DisplayFormat != "" {
+		if p.opts.KeepOriginal {
+			if err := p.keepCopy(ctx, key, key+p.opts.OrigSuffix); err != nil {
+				return res, err
+			}
+		}
+		width, size, err := p.renderDisplay(ctx, key, data, 0, meta)
+		if err != nil {
+			return res, err
+		}
+		res.Outcome = Recompressed
+		res.NewWidth = width
+		res.Bytes = size
+		res.Took = time.Since(start)
+		return res, nil
+	}
 	display, width, err := reencode(data, p.opts.DisplayQuality)
 	if err != nil {
 		return res, fmt.Errorf("re-encode %s: %w", key, err)

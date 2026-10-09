@@ -24,6 +24,7 @@ ARG VERSION
 ENV VERSION=$VERSION \
     UPSCALER_BINARY=/app/runner/upscale.py \
     UPSCALER_MODELS_DIR=/app/runner/models \
+    UPSCALER_DISPLAY_BINARY=/app/runner/display.py \
     UPSCALER_MODEL=realesr-general-x4v3 \
     PORT=3000
 EXPOSE 3000
