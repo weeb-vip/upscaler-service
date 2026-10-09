@@ -34,8 +34,11 @@ func newPipeline(cfg config.Config) (*pipeline.Pipeline, error) {
 // not, and should work in an image without the model too.
 func newPipelineWith(cfg config.Config, store bucket.Store) (*pipeline.Pipeline, error) {
 	up := newUpscaler(cfg)
-	if err := up.Check(); err != nil {
-		return nil, err
+	// No model in a --no-upscale walk, so no runner to find.
+	if !cfg.Pipeline.SkipUpscale {
+		if err := up.Check(); err != nil {
+			return nil, err
+		}
 	}
 	var purger purge.Purger
 	if cf := purge.NewCloudflare(cfg.CloudflareZoneID, cfg.CloudflareToken); cf != nil {
