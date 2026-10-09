@@ -20,6 +20,7 @@ var (
 	backfillLimit   int
 	backfillDryRun  bool
 	backfillWorkers int
+	backfillNoModel bool
 )
 
 // backfillCmd walks the bucket and runs the pipeline over everything under a
@@ -33,6 +34,9 @@ var backfillCmd = &cobra.Command{
 		cfg := config.Load()
 		if backfillPrefix == "" {
 			backfillPrefix = cfg.Bucket.Prefix + "/"
+		}
+		if backfillNoModel {
+			cfg.Pipeline.SkipUpscale = true
 		}
 		p, err := newPipeline(cfg)
 		if err != nil {
@@ -120,6 +124,7 @@ func init() {
 	backfillCmd.Flags().StringVar(&backfillPrefix, "prefix", "", "bucket prefix to walk (default MINIO_PREFIX/)")
 	backfillCmd.Flags().IntVar(&backfillLimit, "limit", 0, "stop after this many objects (0 = all)")
 	backfillCmd.Flags().BoolVar(&backfillDryRun, "dry-run", false, "list what would be considered, touch nothing")
+	backfillCmd.Flags().BoolVar(&backfillNoModel, "no-upscale", false, "no model: only bring oversized objects down to display size and weight; small sources are left for a later walk")
 	backfillCmd.Flags().IntVar(&backfillWorkers, "workers", 1, "keys handled at once; more than 1 for a machine whose runner leaves cores idle")
 	rootCmd.AddCommand(backfillCmd)
 }

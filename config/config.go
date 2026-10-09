@@ -91,6 +91,9 @@ type PipelineConfig struct {
 	DisplayQuality int
 	// MaxBytes: a stored object heavier than this is re-encoded, once.
 	MaxBytes int
+	// SkipUpscale: no model, only the display treatment. Set by backfill
+	// --no-upscale, not by the environment.
+	SkipUpscale bool
 }
 
 type NatsConfig struct {

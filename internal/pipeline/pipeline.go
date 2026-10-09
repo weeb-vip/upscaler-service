@@ -97,6 +97,12 @@ type Options struct {
 	// more, so a 1.3 MB poster is 1.3 MB on every card that shows it. 0
 	// turns it off.
 	MaxBytes int
+	// SkipUpscale: no model. A source that would be upscaled is only given
+	// the display treatment (re-encoded if heavy) and left for a later
+	// walk, which still finds it unmarked and small. The fast first pass
+	// over a bucket: every oversized object is brought down in minutes,
+	// the slow work comes after.
+	SkipUpscale bool
 }
 
 // Metadata written on a replaced object. image-sync's `source-length` is
@@ -237,7 +243,7 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 	// capped back to 600px was 26 seconds for the same pixels. Such an
 	// object only gets the display treatment below.
 	atCap := cap > 0 && cfg.Width >= cap
-	if cfg.Width >= p.opts.MinWidth || atCap {
+	if cfg.Width >= p.opts.MinWidth || atCap || p.opts.SkipUpscale {
 		// Not upscaled, but still served as stored: a 1920px banner or a
 		// heavy poster gets the same display treatment, once.
 		if meta[MetaNormalized] == "" && cap > 0 && cfg.Width > cap {
