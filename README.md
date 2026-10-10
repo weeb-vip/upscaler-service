@@ -85,6 +85,11 @@ processes, one per worker (`UPSCALER_RUNNER_POOL` to override), instead of
 starting Python and loading the network for every image. Unset, each job is
 its own process as before.
 
+`UPSCALER_COREML_UNITS=CPUAndNeuralEngine` runs the network through Core ML
+on a Mac's Neural Engine (also `CPUAndGPU`, `ALL`); unset is the CPU, which
+is what the cluster has. On an M1 Max a 225px poster drops from 6.6s on one
+CPU thread to about 0.5s, with output matching the CPU to within one level.
+
 `backfill --no-upscale` is the fast pass: no model, every treated or oversized
 object brought to display size, format and weight; `--workers N` runs keys in
 parallel; `--verbose` logs every key.

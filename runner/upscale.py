@@ -37,13 +37,27 @@ def parse():
     return p.parse_args()
 
 
+def providers() -> list:
+    """The execution providers, from UPSCALER_COREML_UNITS. Unset is the CPU,
+    which is what the cluster has. On a Mac, CPUAndNeuralEngine runs the
+    network on the Neural Engine: measured on an M1 Max, a 225px poster went
+    from 6.6s on one CPU thread to 0.55s, and eight processes sharing it did
+    64 images in 15s against a CPU that was busy with other work. CPUAndGPU
+    and ALL are accepted too; the CPU is always the fallback for any part
+    Core ML will not take."""
+    units = os.environ.get("UPSCALER_COREML_UNITS", "")
+    if not units or "CoreMLExecutionProvider" not in ort.get_available_providers():
+        return ["CPUExecutionProvider"]
+    return [("CoreMLExecutionProvider", {"ModelFormat": "MLProgram", "MLComputeUnits": units}), "CPUExecutionProvider"]
+
+
 def session(model_path: str, threads: int) -> ort.InferenceSession:
     opts = ort.SessionOptions()
     opts.log_severity_level = 3
     if threads > 0:
         opts.intra_op_num_threads = threads
         opts.inter_op_num_threads = 1
-    return ort.InferenceSession(model_path, opts, providers=["CPUExecutionProvider"])
+    return ort.InferenceSession(model_path, opts, providers=providers())
 
 
 def run_tiled(sess, img: np.ndarray, tile: int, pad: int = 10) -> np.ndarray:
