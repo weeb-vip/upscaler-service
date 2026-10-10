@@ -179,6 +179,14 @@ const (
 	// Reencoded: an already-treated object whose display copy was in another
 	// format; re-made from its best source, variants beside it.
 	Reencoded Outcome = "re-encoded"
+	// IsVariant: a width variant (<key>-w320), derived, left alone.
+	IsVariant Outcome = "is-variant"
+	// VariantRepaired: a variant an earlier walk had treated as an image,
+	// rebuilt from its base.
+	VariantRepaired Outcome = "variant-repaired"
+	// JunkRemoved: a copy made of a variant (<key>-w320-orig, -w320-w320)
+	// by that walk, deleted.
+	JunkRemoved Outcome = "junk-removed"
 )
 
 // MetaNormalized marks an object the pipeline has sized and compressed for
@@ -201,8 +209,21 @@ func (p *Pipeline) Handle(ctx context.Context, key string) (Result, error) {
 	start := time.Now()
 	res := Result{Key: key}
 	if strings.HasSuffix(key, p.opts.OrigSuffix) || strings.HasSuffix(key, p.opts.FullSuffix) {
+		// The -orig or -full of a variant is a copy an earlier walk made by
+		// mistake; anything else is a real original or full result.
+		base := strings.TrimSuffix(strings.TrimSuffix(key, p.opts.OrigSuffix), p.opts.FullSuffix)
+		if _, _, ok := variantOf(base); ok {
+			if err := p.store.Delete(ctx, key); err != nil {
+				return res, fmt.Errorf("delete %s: %w", key, err)
+			}
+			res.Outcome = JunkRemoved
+			return res, nil
+		}
 		res.Outcome = IsOriginal
 		return res, nil
+	}
+	if base, width, ok := variantOf(key); ok {
+		return p.handleVariant(ctx, key, base, width, res)
 	}
 
 	data, _, meta, err := p.store.Get(ctx, key)

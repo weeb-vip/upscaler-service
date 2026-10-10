@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 
@@ -88,7 +87,7 @@ var backfillCmd = &cobra.Command{
 					} else {
 						counts[res.Outcome]++
 						switch {
-						case res.Outcome == pipeline.Upscaled || res.Outcome == pipeline.Repaired || res.Outcome == pipeline.Downsized || res.Outcome == pipeline.Recompressed || res.Outcome == pipeline.Reencoded:
+						case res.Outcome == pipeline.Upscaled || res.Outcome == pipeline.Repaired || res.Outcome == pipeline.Downsized || res.Outcome == pipeline.Recompressed || res.Outcome == pipeline.Reencoded || res.Outcome == pipeline.VariantRepaired:
 							log.Printf("%s: %s, %dpx -> %dpx, %d bytes, %s", key, res.Outcome, res.Width, res.NewWidth, res.Bytes, res.Took.Round(1e6))
 						case backfillVerbose:
 							log.Printf("%s: %s (%dpx)", key, res.Outcome, res.Width)
@@ -109,9 +108,6 @@ var backfillCmd = &cobra.Command{
 			if e.Err != nil {
 				listErr = fmt.Errorf("list %s: %w", backfillPrefix, e.Err)
 				break
-			}
-			if strings.HasSuffix(e.Key, cfg.Pipeline.OrigSuffix) {
-				continue
 			}
 			seen++
 			if backfillLimit > 0 && seen > backfillLimit {

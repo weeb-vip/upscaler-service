@@ -22,6 +22,8 @@ type Store interface {
 	// Copy duplicates an object server-side, metadata included.
 	Copy(ctx context.Context, srcKey, dstKey string) error
 	Exists(ctx context.Context, key string) (bool, error)
+	// Delete removes one object; a missing one is not an error.
+	Delete(ctx context.Context, key string) error
 	// List walks every object key under prefix.
 	List(ctx context.Context, prefix string) <-chan Entry
 }
@@ -86,6 +88,10 @@ func (m *Minio) Copy(ctx context.Context, srcKey, dstKey string) error {
 		minio.CopyDestOptions{Bucket: m.bucket, Object: dstKey},
 		minio.CopySrcOptions{Bucket: m.bucket, Object: srcKey})
 	return err
+}
+
+func (m *Minio) Delete(ctx context.Context, key string) error {
+	return m.client.RemoveObject(ctx, m.bucket, key, minio.RemoveObjectOptions{})
 }
 
 func (m *Minio) Exists(ctx context.Context, key string) (bool, error) {

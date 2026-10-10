@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"log"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -171,4 +172,69 @@ func (p *Pipeline) purge(ctx context.Context, urls []string) {
 		// The object is replaced; a stale edge copy ages out on its own.
 		log.Printf("purge %v: %v", urls, err)
 	}
+}
+
+var variantRe = regexp.MustCompile(`^(.+)-w([0-9]+)$`)
+
+// variantOf splits "<base>-w<width>" into its parts.
+func variantOf(key string) (base string, width int, ok bool) {
+	m := variantRe.FindStringSubmatch(key)
+	if m == nil {
+		return "", 0, false
+	}
+	w, err := strconv.Atoi(m[2])
+	if err != nil || w <= 0 {
+		return "", 0, false
+	}
+	return m[1], w, true
+}
+
+// handleVariant: a width variant is derived from its base key and is never
+// treated as an image of its own. One that an earlier walk did treat as an
+// image (upscaled, so marked and the wrong width) is rebuilt from the base's
+// best source, and the copies that walk made of it (-orig, -full, variants of
+// the variant) are removed when the walk reaches them.
+func (p *Pipeline) handleVariant(ctx context.Context, key, base string, width int, res Result) (Result, error) {
+	if _, _, nested := variantOf(base); nested {
+		if err := p.store.Delete(ctx, key); err != nil {
+			return res, fmt.Errorf("delete %s: %w", key, err)
+		}
+		res.Outcome = JunkRemoved
+		return res, nil
+	}
+	data, _, meta, err := p.store.Get(ctx, key)
+	if err != nil {
+		return res, fmt.Errorf("get %s: %w", key, err)
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err == nil && cfg.Width == width && meta[MetaUpscaled] == "" {
+		res.Outcome = IsVariant
+		return res, nil
+	}
+	if p.opts.Encoder == nil || p.opts.DisplayFormat == "" {
+		res.Outcome = IsVariant
+		return res, nil
+	}
+	baseData, _, _, err := p.store.Get(ctx, base)
+	if err != nil {
+		return res, fmt.Errorf("get %s: %w", base, err)
+	}
+	source, err := p.bestSource(ctx, base, baseData)
+	if err != nil {
+		return res, err
+	}
+	v, err := p.opts.Encoder.Encode(ctx, source, width, p.opts.DisplayFormat, p.opts.DisplayQuality)
+	if err != nil {
+		return res, fmt.Errorf("encode %s: %w", key, err)
+	}
+	vMeta := map[string]string{MetaDisplayWidth: strconv.Itoa(width), MetaDisplayFormat: p.opts.DisplayFormat}
+	if err := p.store.Put(ctx, key, v, contentTypeFor(p.opts.DisplayFormat), vMeta); err != nil {
+		return res, fmt.Errorf("put %s: %w", key, err)
+	}
+	p.purge(ctx, []string{p.urlOf(key)})
+	log.Printf("variant %s was treated as an image: rebuilt from %s", key, base)
+	res.Outcome = VariantRepaired
+	res.NewWidth = width
+	res.Bytes = len(v)
+	return res, nil
 }

@@ -35,6 +35,10 @@ func (m *memStore) Copy(_ context.Context, src, dst string) error {
 	m.objs[dst] = m.objs[src]
 	return nil
 }
+func (m *memStore) Delete(_ context.Context, key string) error {
+	delete(m.objs, key)
+	return nil
+}
 func (m *memStore) Exists(_ context.Context, key string) (bool, error) {
 	_, ok := m.objs[key]
 	return ok, nil
@@ -786,5 +790,53 @@ func TestAKeyThatLostItsUpscaleIsRestoredAndUpscaledAgain(t *testing.T) {
 	}
 	if store2.objs["weeb/two"].meta[MetaUpscaled] != "" || store2.objs["weeb/two"].ct != "image/jpeg" {
 		t.Errorf("no model: the key should be the plain original again: %v", store2.objs["weeb/two"].meta)
+	}
+}
+
+// Variants are derived: a walk never upscales one. The regression: the
+// 24-worker walk took weeb/<x>-w320 for a small source and upscaled it.
+func TestAVariantIsNeverTreatedAsAnImage(t *testing.T) {
+	store := &memStore{objs: map[string]obj{
+		"weeb/one-w320": {jpegOf(320, 450), "image/webp", map[string]string{MetaDisplayWidth: "320", MetaDisplayFormat: "webp"}},
+	}}
+	up := &fakeUp{}
+	_, _, p := webpPipeline(store, up)
+	res, err := p.Handle(context.Background(), "weeb/one-w320")
+	if err != nil || res.Outcome != IsVariant || up.calls != 0 || len(store.objs) != 1 {
+		t.Fatalf("%+v %v calls=%d objs=%d", res, err, up.calls, len(store.objs))
+	}
+}
+
+// What that walk left: the variant upscaled to 600px and marked, with an
+// -orig, a -full and a variant of its own. The variant is rebuilt from its
+// base at its own width; the copies are deleted.
+func TestADamagedVariantIsRebuiltAndItsCopiesRemoved(t *testing.T) {
+	marked := map[string]string{MetaUpscaled: "m x2", MetaFromWidth: "320", MetaNormalized: "1"}
+	store := &memStore{objs: map[string]obj{
+		"weeb/one":           {jpegOf(450, 640), "image/webp", map[string]string{MetaUpscaled: "m x2", MetaNormalized: "1", MetaDisplayFormat: "webp"}},
+		"weeb/one-orig":      {jpegOf(225, 320), "image/jpeg", nil},
+		"weeb/one-w320":      {jpegOf(600, 850), "image/webp", marked},
+		"weeb/one-w320-orig": {jpegOf(320, 450), "image/webp", nil},
+		"weeb/one-w320-full": {jpegOf(1280, 1800), "image/webp", nil},
+		"weeb/one-w320-w320": {jpegOf(320, 450), "image/webp", nil},
+	}}
+	up := &fakeUp{}
+	_, _, p := webpPipeline(store, up)
+	for _, k := range []string{"weeb/one-w320", "weeb/one-w320-full", "weeb/one-w320-orig", "weeb/one-w320-w320"} {
+		if _, err := p.Handle(context.Background(), k); err != nil {
+			t.Fatalf("%s: %v", k, err)
+		}
+	}
+	v := store.objs["weeb/one-w320"]
+	if widthOf(v.data) != 320 || v.meta[MetaUpscaled] != "" || v.meta[MetaDisplayFormat] != "webp" {
+		t.Errorf("variant not rebuilt: %dpx %v", widthOf(v.data), v.meta)
+	}
+	for _, k := range []string{"weeb/one-w320-orig", "weeb/one-w320-full", "weeb/one-w320-w320"} {
+		if _, ok := store.objs[k]; ok {
+			t.Errorf("%s still there", k)
+		}
+	}
+	if _, ok := store.objs["weeb/one-orig"]; !ok || up.calls != 0 {
+		t.Error("the real original was touched, or the model ran")
 	}
 }
