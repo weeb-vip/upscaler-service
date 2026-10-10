@@ -34,6 +34,14 @@ type Options struct {
 	// set, so fewer threads is the lever when a run is OOM-killed.
 	Threads string
 	Timeout time.Duration
+	// Pool, when set, runs each upscale in a long-lived runner/serve.py
+	// instead of a fresh process: the network stays loaded between images.
+	Pool Caller
+}
+
+// Caller is the runner pool's one method.
+type Caller interface {
+	Call(ctx context.Context, req map[string]any) (string, error)
 }
 
 // Formats the binary can write, by extension.
@@ -66,6 +74,9 @@ func (u *Upscaler) Options() Options { return u.opts }
 
 // Check confirms the binary can be found. The server refuses to start without it.
 func (u *Upscaler) Check() error {
+	if u.opts.Pool != nil {
+		return nil
+	}
 	if _, err := exec.LookPath(u.opts.Binary); err != nil {
 		return fmt.Errorf("upscaler binary %q not found: %w", u.opts.Binary, err)
 	}
@@ -105,6 +116,33 @@ func (u *Upscaler) Args(in, out string, scale int) []string {
 func (u *Upscaler) File(ctx context.Context, in, out string, scale int) error {
 	ctx, cancel := context.WithTimeout(ctx, u.opts.Timeout)
 	defer cancel()
+	if u.opts.Pool != nil {
+		if scale == 0 {
+			scale = u.opts.Scale
+		}
+		threads := 0
+		if parts := strings.Split(u.opts.Threads, ":"); u.opts.Threads != "" {
+			pick := parts[0]
+			if len(parts) == 3 {
+				pick = parts[1]
+			}
+			threads, _ = strconv.Atoi(pick)
+		}
+		_, err := u.opts.Pool.Call(ctx, map[string]any{
+			"op": "upscale", "in": in, "out": out, "model": u.opts.Model, "models_dir": u.opts.ModelsDir,
+			"scale": scale, "tile": u.opts.Tile, "threads": threads, "format": strings.TrimPrefix(filepath.Ext(out), "."),
+		})
+		if err != nil {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return fmt.Errorf("upscale timed out after %s", u.opts.Timeout)
+			}
+			return fmt.Errorf("upscale failed: %w", err)
+		}
+		if st, err := os.Stat(out); err != nil || st.Size() == 0 {
+			return errors.New("upscale produced no output")
+		}
+		return nil
+	}
 
 	cmd := exec.CommandContext(ctx, u.opts.Binary, u.Args(in, out, scale)...)
 	var stderr bytes.Buffer

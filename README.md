@@ -79,6 +79,12 @@ can ask for the size it draws. The key's metadata says what it holds
 the configured one is re-encoded from its best source (`-full`, else `-orig`)
 on the next walk, which is how the bucket converts.
 
+`UPSCALER_RUNNER_SERVE` (runner/serve.py, or `scripts/serve-local.sh` for the
+repo's virtualenv) sends upscales and encodes to a pool of long-lived runner
+processes, one per worker (`UPSCALER_RUNNER_POOL` to override), instead of
+starting Python and loading the network for every image. Unset, each job is
+its own process as before.
+
 `backfill --no-upscale` is the fast pass: no model, every treated or oversized
 object brought to display size, format and weight; `--workers N` runs keys in
 parallel; `--verbose` logs every key.

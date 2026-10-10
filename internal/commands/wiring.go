@@ -2,20 +2,46 @@ package commands
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/weeb-vip/upscaler-service/config"
 	"github.com/weeb-vip/upscaler-service/internal/bucket"
 	"github.com/weeb-vip/upscaler-service/internal/encoder"
 	"github.com/weeb-vip/upscaler-service/internal/pipeline"
 	"github.com/weeb-vip/upscaler-service/internal/purge"
+	"github.com/weeb-vip/upscaler-service/internal/runner"
 	"github.com/weeb-vip/upscaler-service/internal/upscaler"
 )
 
+// runnerPool is shared by the upscaler and the encoder of one process.
+var (
+	runnerPoolOnce sync.Once
+	runnerPool     *runner.Pool
+)
+
+func poolFor(cfg config.Config) *runner.Pool {
+	if cfg.Pipeline.RunnerServe == "" {
+		return nil
+	}
+	runnerPoolOnce.Do(func() {
+		size := cfg.Pipeline.RunnerPoolSize
+		if size <= 0 {
+			size = 1
+		}
+		runnerPool = runner.New(cfg.Pipeline.RunnerServe, size)
+	})
+	return runnerPool
+}
+
 func newUpscaler(cfg config.Config) *upscaler.Upscaler {
-	return upscaler.New(upscaler.Options{
+	opts := upscaler.Options{
 		Binary: cfg.Binary, ModelsDir: cfg.ModelsDir, Model: cfg.Model, Scale: cfg.Scale,
 		GPU: cfg.GPU, Tile: cfg.Tile, Threads: cfg.Threads, Timeout: cfg.Timeout,
-	})
+	}
+	if p := poolFor(cfg); p != nil {
+		opts.Pool = p
+	}
+	return upscaler.New(opts)
 }
 
 // newPipeline wires the bucket, the runner and the purge from the config.
@@ -43,7 +69,11 @@ func newPipelineWith(cfg config.Config, store bucket.Store) (*pipeline.Pipeline,
 	}
 	var enc pipeline.Encoder
 	if cfg.Pipeline.DisplayFormat != "" && cfg.Pipeline.DisplayFormat != "jpg" {
-		e := encoder.New(encoder.Options{Binary: cfg.Pipeline.DisplayBinary})
+		eopts := encoder.Options{Binary: cfg.Pipeline.DisplayBinary}
+		if p := poolFor(cfg); p != nil {
+			eopts.Pool = p
+		}
+		e := encoder.New(eopts)
 		if err := e.Check(); err != nil {
 			return nil, err
 		}

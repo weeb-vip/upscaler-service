@@ -98,6 +98,11 @@ type PipelineConfig struct {
 	DisplayFormat string
 	// DisplayBinary is runner/display.py, or a wrapper running it in a venv.
 	DisplayBinary string
+	// RunnerServe, when set, is runner/serve.py (or a venv wrapper): upscales
+	// and encodes go to a pool of long-lived runner processes instead of a
+	// process per image. RunnerPoolSize defaults to the number of workers.
+	RunnerServe    string
+	RunnerPoolSize int
 	// Variants per kind: stored widths beside the key, e.g. "320,640".
 	Variants map[string][]int
 }
@@ -145,6 +150,8 @@ func Load() Config {
 			DisplayWidths:  byKind("UPSCALER_MAX_WIDTH_"),
 			DisplayFormat:  env("UPSCALER_DISPLAY_FORMAT", "webp"),
 			DisplayBinary:  env("UPSCALER_DISPLAY_BINARY", "runner/display.py"),
+			RunnerServe:    env("UPSCALER_RUNNER_SERVE", ""),
+			RunnerPoolSize: intEnv("UPSCALER_RUNNER_POOL", 0),
 			Variants:       listsByKind("UPSCALER_VARIANTS_"),
 			KeepFull:       env("UPSCALER_KEEP_FULL", "true") == "true",
 			DisplayQuality: intEnv("UPSCALER_DISPLAY_QUALITY", 85),

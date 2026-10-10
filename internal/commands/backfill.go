@@ -39,6 +39,9 @@ var backfillCmd = &cobra.Command{
 		if backfillNoModel {
 			cfg.Pipeline.SkipUpscale = true
 		}
+		if cfg.Pipeline.RunnerPoolSize <= 0 {
+			cfg.Pipeline.RunnerPoolSize = backfillWorkers
+		}
 		p, err := newPipeline(cfg)
 		if err != nil {
 			return err

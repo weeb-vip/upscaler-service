@@ -65,41 +65,65 @@ def run_tiled(sess, img: np.ndarray, tile: int, pad: int = 10) -> np.ndarray:
     return out
 
 
-def main() -> int:
-    a = parse()
-    start = time.time()
-    model_path = os.path.join(a.m, a.n + ".onnx")
-    if not os.path.exists(model_path):
-        print(f"model not found: {model_path}", file=sys.stderr)
-        return 2
-    threads = 0
-    if a.j:
-        parts = a.j.split(":")
-        threads = int(parts[1] if len(parts) == 3 else parts[0])
-    tile = a.t if a.t > 0 else 256
+_sessions = {}
 
-    src = Image.open(a.i).convert("RGB")
+
+def cached_session(model_path: str, threads: int) -> ort.InferenceSession:
+    """One session per model and thread count, kept for the life of the
+    process: loading the network is most of a short run's cost, and serve.py
+    answers many requests from one process."""
+    key = (model_path, threads)
+    if key not in _sessions:
+        _sessions[key] = session(model_path, threads)
+    return _sessions[key]
+
+
+def threads_of(spec: str) -> int:
+    if not spec:
+        return 0
+    parts = spec.split(":")
+    return int(parts[1] if len(parts) == 3 else parts[0])
+
+
+def upscale_file(i: str, o: str, model: str, models_dir: str, scale: int, tile: int, threads: int, fmt: str) -> str:
+    """Upscale one file into another; returns a one-line summary. Raises on
+    a missing model or an all-black result."""
+    start = time.time()
+    model_path = os.path.join(models_dir, model + ".onnx")
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"model not found: {model_path}")
+    tile = tile if tile > 0 else 256
+    src = Image.open(i).convert("RGB")
     img = np.asarray(src, dtype=np.float32) / 255.0
-    sess = session(model_path, threads)
+    sess = cached_session(model_path, threads)
     out = np.nan_to_num(run_tiled(sess, img, tile), nan=0.0, posinf=1.0, neginf=0.0)
     if img.max() > 0.02 and out.max() <= 0.02:
-        # A black frame for a picture is a broken run, not a result; the
-        # ncnn Vulkan build used to write exactly that and call it done.
-        print("upscale produced an all-black image", file=sys.stderr)
-        return 3
+        raise RuntimeError("upscale produced an all-black image")
     result = Image.fromarray(np.clip(out * 255.0 + 0.5, 0, 255).astype(np.uint8))
-    if a.s != NATIVE_SCALE:
-        result = result.resize((src.width * a.s, src.height * a.s), Image.LANCZOS)
-
-    fmt = (a.f or os.path.splitext(a.o)[1].lstrip(".") or "png").lower()
+    if scale != NATIVE_SCALE:
+        result = result.resize((src.width * scale, src.height * scale), Image.LANCZOS)
+    fmt = (fmt or os.path.splitext(o)[1].lstrip(".") or "png").lower()
     if fmt in ("jpg", "jpeg"):
-        result.save(a.o, "JPEG", quality=92)
+        result.save(o, "JPEG", quality=92)
     elif fmt == "webp":
-        result.save(a.o, "WEBP", quality=92)
+        result.save(o, "WEBP", quality=92)
     else:
-        result.save(a.o, "PNG")
+        result.save(o, "PNG")
+    return f"{i} -> {o} ({model}, x{scale}, tile {tile}, {time.time() - start:.1f}s)"
+
+
+def main() -> int:
+    a = parse()
+    try:
+        summary = upscale_file(a.i, a.o, a.n, a.m, a.s, a.t, threads_of(a.j), a.f)
+    except FileNotFoundError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    except RuntimeError as e:
+        print(str(e), file=sys.stderr)
+        return 3
     if a.v:
-        print(f"{a.i} -> {a.o} ({a.n}, x{a.s}, tile {tile}, {time.time() - start:.1f}s)", file=sys.stderr)
+        print(summary, file=sys.stderr)
     return 0
 
 

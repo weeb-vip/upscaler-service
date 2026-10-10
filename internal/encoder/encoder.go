@@ -21,6 +21,13 @@ type Options struct {
 	// Binary is the display.py path (or a wrapper that runs it in a venv).
 	Binary  string
 	Timeout time.Duration
+	// Pool, when set, encodes in a long-lived runner/serve.py.
+	Pool Caller
+}
+
+// Caller is the runner pool's one method.
+type Caller interface {
+	Call(ctx context.Context, req map[string]any) (string, error)
 }
 
 type Encoder struct {
@@ -37,6 +44,9 @@ func New(opts Options) *Encoder {
 
 // Check reports whether the binary can be found.
 func (e *Encoder) Check() error {
+	if e.opts.Pool != nil {
+		return nil
+	}
 	if e.opts.Binary == "" {
 		return errors.New("display encoder binary not set")
 	}
@@ -61,6 +71,16 @@ func (e *Encoder) Encode(ctx context.Context, src []byte, width int, format stri
 	}
 	ctx, cancel := context.WithTimeout(ctx, e.opts.Timeout)
 	defer cancel()
+	if e.opts.Pool != nil {
+		if _, err := e.opts.Pool.Call(ctx, map[string]any{"op": "display", "in": in, "out": out, "width": width, "format": format, "quality": quality}); err != nil {
+			return nil, fmt.Errorf("encode failed: %w", err)
+		}
+		data, err := os.ReadFile(out)
+		if err != nil || len(data) == 0 {
+			return nil, errors.New("encode produced no output")
+		}
+		return data, nil
+	}
 	cmd := exec.CommandContext(ctx, e.opts.Binary, "-i", in, "-o", out, "-w", strconv.Itoa(width), "-f", format, "-q", strconv.Itoa(quality))
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

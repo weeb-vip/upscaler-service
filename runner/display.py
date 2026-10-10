@@ -26,26 +26,34 @@ def parse():
     return p.parse_args()
 
 
-def main() -> int:
-    a = parse()
-    img = Image.open(a.i)
+def display_file(i: str, o: str, width: int, fmt: str, quality: int) -> str:
+    """The display copy of one file; returns a one-line summary."""
+    img = Image.open(i)
     img.load()
     if img.mode not in ("RGB", "RGBA"):
         img = img.convert("RGB")
-    if a.w > 0 and img.width > a.w:
-        h = round(img.height * a.w / img.width)
-        img = img.resize((a.w, h), Image.LANCZOS)
-    fmt = a.f.lower()
+    if width > 0 and img.width > width:
+        h = round(img.height * width / img.width)
+        img = img.resize((width, h), Image.LANCZOS)
+    fmt = fmt.lower()
     if fmt == "webp":
-        img.save(a.o, "WEBP", quality=a.q, method=6)
+        img.save(o, "WEBP", quality=quality, method=6)
     elif fmt in ("jpg", "jpeg"):
         if img.mode == "RGBA":
             img = img.convert("RGB")
-        img.save(a.o, "JPEG", quality=a.q, optimize=True, progressive=True)
+        img.save(o, "JPEG", quality=quality, optimize=True, progressive=True)
     else:
-        print(f"unsupported format {a.f}", file=sys.stderr)
+        raise ValueError(f"unsupported format {fmt}")
+    return f"{i} -> {o} ({img.width}x{img.height}, {fmt} q{quality})"
+
+
+def main() -> int:
+    a = parse()
+    try:
+        print(display_file(a.i, a.o, a.w, a.f, a.q), file=sys.stderr)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
         return 2
-    print(f"{a.i} -> {a.o} ({img.width}x{img.height}, {fmt} q{a.q})", file=sys.stderr)
     return 0
 
 
